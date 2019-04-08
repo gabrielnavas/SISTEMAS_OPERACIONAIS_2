@@ -1312,8 +1312,12 @@ void deletar_diretorio_vazio(Block disco[], int *topo_blocks_free, int endereco_
 	//APAGA ARQUIVO DO DIRETORIO ANTERIOR
 	endereco_anterior = disco[endereco_struct_dir].diretorio.i_numero[1]; //pega inode anterior
 	endereco_anterior = disco[endereco_struct_dir].inode.b_diretos[0]; //pega struct desse inode anterior
+	
+	//ACHA O INODE NUMBER NO DIRETORIO ANTERIROR PARA APAGAR O DIRETORIO EM QUESTAO
 	for(i=0 ; i < disco[endereco_anterior].diretorio.tl && 
 		disco[endereco_anterior].diretorio.i_numero[i] != endereco_inode_dir_atual ; i++);
+		
+	//REMANEJA ARQUIVO RETIRADO DO DIRETORIO ANTERIOR	
 	while(i < disco[endereco_anterior].diretorio.tl-1)
 	{
 		strcpy(disco[endereco_anterior].diretorio.nome_arq[i], disco[endereco_anterior].diretorio.nome_arq[i+1]);
@@ -1322,7 +1326,10 @@ void deletar_diretorio_vazio(Block disco[], int *topo_blocks_free, int endereco_
 		i++;
 	}	
 	
+	//DEVOLVE ESTRUTURA NUMBER
 	push_lista_block(disco, &*topo_blocks_free, endereco_struct_dir);
+	
+	//DEVOLVE INODE NUMBER 
 	push_lista_block(disco, &*topo_blocks_free, endereco_inode_dir_atual);
 }
 
@@ -1397,7 +1404,6 @@ void remover_inode_extend_simples(Block disco[], int * topo_blocks_free, int end
 	
 	for(i=0 ; i < 5 && *quantidade_blocos > 0 && *cont_blocks < 159; i++)
 	{
-//		printf("i:%d qnt_blocos:%d cont_blocks:%d\n", i, *quantidade_blocos, *cont_blocks);
 		//ALOCA DENTRO DA LISTA DA ESTRUTURA DE INODE EXTENDIDO
 		endereco_blocos = disco[endereco_inode_atual_simples].inode_extend.b_diretos[i];
 		disco[endereco_inode_atual_simples].inode_extend.b_diretos[i] = 0;
@@ -1406,7 +1412,6 @@ void remover_inode_extend_simples(Block disco[], int * topo_blocks_free, int end
 		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
 		
 		(*cont_blocks)++;
-//		printf("bytes: %d, blocos: %d\n", *quantidade_bytes, *cont_blocks);
 		
 		if(i < 5 && *quantidade_blocos > 0 && *cont_blocks < 159)
 		 (*quantidade_blocos)--;
@@ -1445,8 +1450,6 @@ void remover_inode_extend_duplo(Block disco[], int * topo_blocks_free,
 		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
 		disco[endereco_inode_atual_duplo].inode_extend.b_diretos[i] = 0;
 		
-//		(cont_blocks)++;
-//		printf("bytes: %d, blocos: %d\n", *quantidade_block_indireto, *cont_blocks);
 	}
 }
 
@@ -1478,12 +1481,29 @@ void deletar_arquivo(Block disco[], int * topo_blocks_free, int endereco_inode_a
 {
 	int endereco_blocos,
 		cont_blocks,
-		i;
+		i,
+		num_int,
+		resto,
+		quantidade_bytes;
+		
+	float div;	
 	
 	if(*quantidade_blocos == -1)
-		*quantidade_blocos = disco[endereco_inode_atual].inode.tamanho / 10;
+	{
+//		*quantidade_blocos = disco[endereco_inode_atual].inode.tamanho / 10;
+		quantidade_bytes = disco[endereco_inode_atual].inode.tamanho;
 	
-//	printf("%d\n", (*quantidade_blocos));
+		//TENHO 103 BYTES
+		num_int = (int) quantidade_bytes / 10; //PARTE INTEIRA = 10
+		div = (float) quantidade_bytes / 10; //PARTE FLOAT 10.3
+		resto = (div - num_int) * 10; //(10.3 - 10) = 0.3 => 0.3 * 10 = 30
+		
+		if(resto > 0)
+			*quantidade_blocos = (quantidade_bytes / 10)+1; //(103/10)+1 = 11 INTEIRO
+		else	
+			*quantidade_blocos = (quantidade_bytes / 10); //(103/10) = 10 INTEIRO
+	}
+		
 
 	cont_blocks = 0;
 	
@@ -1491,7 +1511,7 @@ void deletar_arquivo(Block disco[], int * topo_blocks_free, int endereco_inode_a
 	for(i=0 ; i < 5 && i < *quantidade_blocos ; i++, (*quantidade_blocos)--)
 	{
 		
-//		printf("qntd blocos: %d, i=%d\n", (*quantidade_blocos), i);
+		printf("qntd blocos: %d, i=%d\n", (*quantidade_blocos), i);
 		
 		//PEGA ENDERECO DO BLOCO NA VARIAVEL QUE APONTA
 		endereco_blocos = disco[endereco_inode_atual].inode.b_diretos[i];
@@ -1503,7 +1523,7 @@ void deletar_arquivo(Block disco[], int * topo_blocks_free, int endereco_inode_a
 		cont_blocks++;
 		
 		
-//		printf("qntd blocos: %d, i=%d\n", (*quantidade_blocos), i);
+		printf("qntd blocos: %d, i=%d\n", (*quantidade_blocos), i);
 	}
 	
 	//BLOCOS INDIRETOS SIMPLES QNTD = 5 extend
@@ -1579,6 +1599,8 @@ void rm(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, int e
 	{	//VERIFICA CAMINHO SE OUVER
 		if(strlen(caminho) > 0)
 		{
+			strcat(caminho, "/\0");
+			strcat(caminho, nome_arquivo);
 			//BUSCA ESSE CAMINHO, SE EXISTIR
 			if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode, &endereco_inode_dir_atual, caminho))
 			{			
@@ -1594,7 +1616,7 @@ void rm(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, int e
 					retirar_arquivo_da_estrutua_diretorio(disco, endereco_inode_dir_atual, endereco_inode);
 				}
 				else
-					printf("IMPOSSIVEL APAGAR, NAO ARQUIVO.\n");
+					printf("IMPOSSIVEL APAGAR, NAO EXISTE O ARQUIVO.\n");
 			}
 			else
 				printf("CAMINHO ESPECIFICADO NAO VALIDO.");		
@@ -1616,7 +1638,7 @@ void rm(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, int e
 					retirar_arquivo_da_estrutua_diretorio(disco, endereco_inode_dir_atual, endereco_inode);
 				}
 				else
-					printf("IMPOSSIVEL APAGAR, NAO ARQUIVO.\n");
+					printf("IMPOSSIVEL APAGAR, NAO EXISTE O ARQUIVO.\n");
 			}
 			else
 				printf("CAMINHO ESPECIFICADO NAO VALIDO.");		
@@ -2022,7 +2044,7 @@ void ler_comando(Block disco[], int * topo_blocks_free, int tf_disco,int enderec
 	while(strcmp(comando,"exit") != 0)
 	{
 		printf("[%s@%s]: ", NOME_USUARIO_PADRAO, NOME_GRUPO_PADRAO);
-			fflush(stdin); scanf("%[^\n]s", &comando);
+		fflush(stdin); scanf("%[^\n]s", &comando);
 	
 		if(strcmp(comando, "") != 0)
 		{
@@ -2084,7 +2106,7 @@ void ler_comando(Block disco[], int * topo_blocks_free, int tf_disco,int enderec
 	}
 }
 
-
+//aagit test
 
 int main()
 {	
