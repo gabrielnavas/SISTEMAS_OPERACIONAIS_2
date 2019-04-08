@@ -10,9 +10,7 @@
 struct inode_extend
 {
 	int b_diretos[5];
-}; 
-typedef struct inode_extend InodeExtend;
-
+};
 struct inode_principal
 {
 	char permissoes[11];
@@ -28,7 +26,6 @@ struct inode_principal
 	int b_indi_duplo;
 	int b_indi_triplo;
 };
-typedef struct inode_principal InodePrincipal;
 
 struct diretorio
 {
@@ -44,15 +41,11 @@ struct diretorio
 	
 	struct inode_principal dir_extend;
 };
-typedef struct diretorio Diretorio;
-
 
 struct link_simbolico
 {
-	
+	char caminho[255];
 };
-typedef struct link_simbolico LinkSimb;
-
 
 struct no_lista_block
 {
@@ -61,10 +54,8 @@ struct no_lista_block
 	int prox;
 };
 
-
 struct block
-{
-	
+{	
 	char tipo; 
 	
 	//ESTRUTURA DE INODE, PODE SER DIRETORIO, PODE SER ARQUIVO OU PODE SER LINK HARD
@@ -202,11 +193,23 @@ void criar_estrutura_diretorio( Block disco[], int * topo_blocks_free, int ender
 {	
 	//ALOCA UM DIRETORIO NO DISCO
 	
-	disco[endereco_atual].diretorio.i_numero[0] = endereco_atual;
-	disco[endereco_atual].diretorio.i_numero[1] = (endereco_anterior == -1) ? endereco_atual : endereco_anterior ; 	
+	disco[endereco_atual].diretorio.i_numero[0] = endereco_atual; // .
+	disco[endereco_atual].diretorio.i_numero[1] = (endereco_anterior == -1) ? endereco_atual : endereco_anterior ; 	// ..
 	strcpy(disco[endereco_atual].diretorio.nome_arq[0], ".");
 	strcpy(disco[endereco_atual].diretorio.nome_arq[1], "..");
 	disco[endereco_atual].diretorio.tl=2;	
+}
+
+
+void criar_estrutura_diretorio_extend( Block disco[], int * topo_blocks_free, int endereco_anterior, int endereco_atual, int endereco_block_novo)
+{	
+	//ALOCA UM DIRETORIO NO DISCO
+	
+	disco[endereco_block_novo].diretorio.i_numero[0] = endereco_atual; // .
+	disco[endereco_block_novo].diretorio.i_numero[1] = endereco_anterior;  // ..	
+	strcpy(disco[endereco_block_novo].diretorio.nome_arq[0], ".");
+	strcpy(disco[endereco_block_novo].diretorio.nome_arq[1], "..");
+	disco[endereco_block_novo].diretorio.tl=2;	
 }
 
 void criar_inode_diretorio( Block disco[], int endereco_inode, int endereco_estrutura_dir)
@@ -261,7 +264,7 @@ void inserir_inode_extend_simples(Block disco[], int * topo_blocks_free, int end
 	int i,
 		endereco_blocos;
 	
-	for(i=0 ; i < 5 && *quantidade_bytes > 0 && *cont_blocks < 160; i++)
+	for(i=0 ; i < 5 && *quantidade_bytes > 0 && *cont_blocks < 159; i++)
 	{
 		//RETIRA ENDERECO DA LISTA DE BLOCOS;
 		pop_lista_block(disco, &*topo_blocks_free, &endereco_blocos);
@@ -279,7 +282,7 @@ void inserir_inode_extend_simples(Block disco[], int * topo_blocks_free, int end
 		 (*quantidade_bytes) -= 10;
 	}
 	
-	if(*cont_blocks == 160)
+	if(*cont_blocks == 159)
 	{
 		//RETIRA ENDERECO DA LISTA DE BLOCOS;
 		pop_lista_block(disco, &*topo_blocks_free, &endereco_blocos);
@@ -361,7 +364,7 @@ void criar_inode_arquivo( Block disco[], int * topo_blocks_free, int endereco_in
 	
 	cont_blocks=0; //
 	
-	printf("%d", (*quantidade_bytes));
+//	printf("%d", (*quantidade_bytes));
 	//INSERIR OS BLOCOS DIRETOS QNTD = 5
 	for(i=0; i < *quantidade_bytes && i < 5 ; i++, (*quantidade_bytes) -= 10)
 	{
@@ -391,7 +394,7 @@ void criar_inode_arquivo( Block disco[], int * topo_blocks_free, int endereco_in
 	if(*quantidade_bytes > 0)
 	{
 		pop_lista_block(disco, &*topo_blocks_free, &endereco_blocos);
-		disco[endereco_inode_atual].inode.b_indi_simples = endereco_blocos;
+		disco[endereco_inode_atual].inode.b_indi_duplo = endereco_blocos;
 		
 		inserir_inode_extend_duplo(disco, &*topo_blocks_free, endereco_blocos, &*quantidade_bytes, &cont_blocks);	
 	}
@@ -402,7 +405,7 @@ void criar_inode_arquivo( Block disco[], int * topo_blocks_free, int endereco_in
 	if(*quantidade_bytes > 0)
 	{
 		pop_lista_block(disco, &*topo_blocks_free, &endereco_blocos);
-		disco[endereco_inode_atual].inode.b_indi_simples = endereco_blocos;
+		disco[endereco_inode_atual].inode.b_indi_triplo = endereco_blocos;
 		
 		inserir_inode_extend_triplo(disco, &*topo_blocks_free, endereco_blocos, &*quantidade_bytes, &cont_blocks);
 	}
@@ -410,64 +413,147 @@ void criar_inode_arquivo( Block disco[], int * topo_blocks_free, int endereco_in
 
 void inserir_arquivo_in_estrutura_diretorio(Block disco[], int * topo_blocks_free, 
 												int endereco_inode_dir_atual, char nome_arq[], 
-												int quantidade_bytes_user)
+												int quantidade_bytes_user, int extend)
 {
 	//INSERIR UM ARQUIVO DENTRO DO DIRETORIO ATUAL
 	int endereco_arq_novo,
 		endereco_dir_atual,
-		tl_dir_atual;
+		endereco_dir_novo,
+		endereco_inode_dir_novo,
+		endereco_dir_anterior,
+		tl_dir_atual,
+		endereco_inode_dir_extend,
+		endereco_dir_extend;
 	
-	//retira endereco para o inode do arquivo novo;
-	pop_lista_block(disco, &*topo_blocks_free, &endereco_arq_novo);
+	if(!extend)
+		//pega endereco real da estrutura, (endereco atual eh do inode)
+		endereco_dir_atual = disco[endereco_inode_dir_atual].inode.b_diretos[0];
+	else
+		endereco_dir_atual = endereco_inode_dir_atual;
 	
-	//aloca inode do diretorio novo
-	criar_inode_arquivo(disco, &*topo_blocks_free, endereco_arq_novo, &quantidade_bytes_user);
+	/*POS 0 = .
+	  POS 1 = ..
+	  POS 13 = DIRETORIO EXTENDIDO
+	*/
+	if(disco[endereco_dir_atual].diretorio.tl == 12)
+	{
+		endereco_dir_atual = disco[endereco_dir_atual].diretorio.i_numero[0];
+		endereco_dir_anterior = disco[endereco_dir_atual].diretorio.i_numero[1];
+		
+		//retira endereco para o inode do diretorio novo;
+		pop_lista_block(disco, &*topo_blocks_free, &endereco_dir_novo);
+		
+		//retira endereco para o diretorio novo
+//		pop_lista_block(disco, &*topo_blocks_free, &endereco_inode_dir_novo);
+		
+		//aloca inode do diretorio novo
+//		criar_inode_diretorio(disco, endereco_inode_dir_novo, endereco_dir_novo);
+		
+		//aloca estrutura de diretorio do diretorio novo;
+		criar_estrutura_diretorio_extend(disco, &*topo_blocks_free, endereco_dir_anterior, 
+										 endereco_dir_atual, endereco_dir_novo);
+		
+		//POSICAO 12 RECEBE O NUMERO DO INODE DO DIRETORIO EXTENDIDO
+		disco[endereco_dir_atual].diretorio.i_numero[12] = endereco_dir_novo;
+		
+		inserir_arquivo_in_estrutura_diretorio(disco, &*topo_blocks_free, endereco_dir_novo, nome_arq, quantidade_bytes_user, 1);									 
+	}
+	else if(disco[endereco_dir_atual].diretorio.tl > 12)
+	{
+		endereco_dir_extend = disco[endereco_dir_atual].diretorio.i_numero[12];
+		inserir_arquivo_in_estrutura_diretorio(disco, &*topo_blocks_free, endereco_dir_extend, nome_arq, quantidade_bytes_user, 1);									 
+	}
+	else
+	{
+		//retira endereco para o inode do arquivo novo;
+		pop_lista_block(disco, &*topo_blocks_free, &endereco_arq_novo);
+		
+		//aloca inode do diretorio novo
+		criar_inode_arquivo(disco, &*topo_blocks_free, endereco_arq_novo, &quantidade_bytes_user);
+		
+		//insere esse dir novo na estrutura atual;
+		strcpy(disco[ endereco_dir_atual ].diretorio.nome_arq[ disco[endereco_dir_atual ].diretorio.tl ], nome_arq);
+		disco[ endereco_dir_atual ].diretorio.i_numero[ disco[endereco_dir_atual ].diretorio.tl ] = endereco_arq_novo;
+		
+	}
 	
-	//pega endereco real da estrutura, (endereco atual eh do inode)
-	endereco_dir_atual = disco[endereco_inode_dir_atual].inode.b_diretos[0];
-	
-	//insere esse dir novo na estrutura atual;
-	strcpy(disco[ endereco_dir_atual ].diretorio.nome_arq[ disco[endereco_dir_atual ].diretorio.tl ], nome_arq);
-	disco[ endereco_dir_atual ].diretorio.i_numero[ disco[endereco_dir_atual ].diretorio.tl ] = endereco_arq_novo;
 	disco[endereco_dir_atual ].diretorio.tl++;
-	
-	//tratar quando passa a quantidade de diretorios alocados ============================ (IMPORTANTE)
 }
 
 
 
 void inserir_diretorio_in_estrutura_diretorio(Block disco[], int * topo_blocks_free, 
-												int endereco_inode_dir_atual, char nome_dir[])
+												int endereco_inode_dir_atual, char nome_dir[], int extend)
 {
 	//INSERIR UM DIRETORIO DENTRO DO DIRETORIO ATUAL.
 	
 	int endereco_dir_novo,
 		endereco_inode_dir_novo,
-		tl_dir_atual;
-	
-	//retira endereco para o inode do diretorio novo;
-	pop_lista_block(disco, &*topo_blocks_free, &endereco_dir_novo);
-	
-	//retira endereco para o diretorio novo
-	pop_lista_block(disco, &*topo_blocks_free, &endereco_inode_dir_novo);
-	
-	//aloca inode do diretorio novo
-	criar_inode_diretorio(disco, endereco_inode_dir_novo, endereco_dir_novo);
-	
-	//aloca estrutura de diretorio do diretorio novo;
-	criar_estrutura_diretorio(disco, &*topo_blocks_free, endereco_dir_novo, endereco_inode_dir_atual);
+		tl_dir_atual,
+		endereco_dir_anterior,
+		endereco_dir_atual,
+		endereco_inode_dir_extend;
 	
 	
-	//pega endereco real da estrutura, (endereco atual eh do inode)
-	endereco_dir_novo = disco[endereco_inode_dir_atual].inode.b_diretos[0];
+	if(!extend)
+		//pega endereco real da estrutura, (endereco atual eh do inode)
+		endereco_dir_atual = disco[endereco_inode_dir_atual].inode.b_diretos[0];
+	else
+		endereco_dir_atual = endereco_inode_dir_atual;
 	
-	//insere esse dir novo na estrutura atual;
-	strcpy(disco[ endereco_dir_novo ].diretorio.nome_arq[ disco[endereco_dir_novo ].diretorio.tl ], nome_dir);
-	disco[ endereco_dir_novo ].diretorio.i_numero[ disco[endereco_dir_novo ].diretorio.tl ] = endereco_inode_dir_novo;
-	disco[endereco_dir_novo ].diretorio.tl++;
-	
-	
-	//tratar quando passa a quantidade de diretorios alocados ============================ (IMPORTANTE)
+	/*POS 0 = .
+	  POS 1 = ..
+	  POS 13 = DIRETORIO EXTENDIDO
+	*/
+	if(disco[endereco_dir_atual].diretorio.tl == 12)
+	{
+		endereco_dir_atual = disco[endereco_dir_atual].diretorio.i_numero[0];
+		endereco_dir_anterior = disco[endereco_dir_atual].diretorio.i_numero[1];
+		
+		//retira endereco para o inode do diretorio novo;
+		pop_lista_block(disco, &*topo_blocks_free, &endereco_dir_novo);
+		
+		//retira endereco para o diretorio novo
+//		pop_lista_block(disco, &*topo_blocks_free, &endereco_inode_dir_novo);
+		
+		//aloca inode do diretorio novo
+		criar_inode_diretorio(disco, endereco_inode_dir_novo, endereco_dir_novo);
+		
+		//aloca estrutura de diretorio do diretorio novo;
+		criar_estrutura_diretorio_extend(disco, &*topo_blocks_free, endereco_dir_anterior, 
+										 endereco_dir_atual, endereco_dir_novo);
+		
+		//POSICAO 12 RECEBE O NUMERO DO INODE DO DIRETORIO EXTENDIDO
+		disco[endereco_dir_atual].diretorio.i_numero[12] = endereco_dir_novo;
+		
+		inserir_diretorio_in_estrutura_diretorio(disco, &*topo_blocks_free, endereco_dir_novo, nome_dir, 1);					 
+	}
+	else if(disco[endereco_dir_atual].diretorio.tl > 12)
+	{
+		endereco_inode_dir_extend = disco[endereco_dir_atual].diretorio.i_numero[12];
+		inserir_diretorio_in_estrutura_diretorio(disco, &*topo_blocks_free, endereco_inode_dir_extend, nome_dir, 1);		
+	}
+	else
+	{
+		//retira endereco para o inode do diretorio novo;
+		pop_lista_block(disco, &*topo_blocks_free, &endereco_dir_novo);
+		
+		//retira endereco para o diretorio novo
+		pop_lista_block(disco, &*topo_blocks_free, &endereco_inode_dir_novo);
+		
+		//aloca inode do diretorio novo
+
+		criar_inode_diretorio(disco, endereco_inode_dir_novo, endereco_dir_novo);
+		
+		//aloca estrutura de diretorio do diretorio novo;
+		criar_estrutura_diretorio(disco, &*topo_blocks_free, endereco_dir_novo, endereco_inode_dir_atual);
+		
+		
+		//insere esse dir novo na estrutura atual;
+		strcpy(disco[ endereco_dir_atual ].diretorio.nome_arq[ disco[endereco_dir_atual ].diretorio.tl ], nome_dir);
+		disco[ endereco_dir_atual ].diretorio.i_numero[ disco[endereco_dir_atual ].diretorio.tl ] = endereco_inode_dir_novo;
+	}
+	disco[endereco_dir_atual ].diretorio.tl++;
 }
 
 
@@ -625,19 +711,22 @@ void split_caminho(char caminhos[][255], int * tl_caminhos, char string_caminho[
 	while(string_caminho[i] != '\0' && string_caminho[i] != '\n' && string_caminho[i] != ' ')
 		i++;
 		
-	while(string_caminho[i] == ' ')	
+	while(string_caminho[i] != '\0' && string_caminho[i] != '\n' && string_caminho[i] == ' ')	
 		i++;
-		
-	//RETIRAR COMANDO CD DA STRING
-	j=0;
-	while(string_caminho[i] != '\0' && string_caminho[i] != '\n' && string_caminho[i] != ' ')
+	
+	if(string_caminho[i] != '\0' && string_caminho[i] != '\n')
 	{
-		aux_caminho[j] = string_caminho[i];
-		j++;
-		i++;
-	}
-	aux_caminho[j]='\0';
-	strcpy(string_caminho, aux_caminho);
+		//RETIRAR COMANDO CD DA STRING
+		j=0;
+		while(string_caminho[i] != '\0' && string_caminho[i] != '\n' && string_caminho[i] != ' ')
+		{
+			aux_caminho[j] = string_caminho[i];
+			j++;
+			i++;
+		}
+		aux_caminho[j]='\0';
+		strcpy(string_caminho, aux_caminho);
+	}	
 	
 	tl_string_caminho = strlen(string_caminho);
 	for(i=0 ; i < tl_string_caminho; i++)
@@ -676,17 +765,21 @@ void split_caminho(char caminhos[][255], int * tl_caminhos, char string_caminho[
 }
 
 
-char buscar_inode(Block disco[], int endereco_inode_dir_raiz ,int *endereco_inode_dir_atual, char string_caminho[])
+char buscar_inode(Block disco[], int endereco_inode_dir_raiz, 
+				  int *endereco_inode_atual, int *endereco_inode_dir_atual, char string_caminho[])
 {
 	char caminhos[100][255],
 		 caminho_valido;
 	
 	int i_node_atual,
 		i_node_atual_aux,
+		i_node_dir_atual,
 		endereco_dir,
 		i,
 		j,
 		tl_caminhos;
+	
+
 	
 	//SEPARA NOMES NUMA LISTA DE NOMES
 	tl_caminhos=0;	
@@ -721,7 +814,11 @@ char buscar_inode(Block disco[], int endereco_inode_dir_raiz ,int *endereco_inod
 					
 				if(j < disco[endereco_dir].diretorio.tl && 
 				strcmp(disco[endereco_dir].diretorio.nome_arq[j], caminhos[i]) == 0)
-						i_node_atual = disco[endereco_dir].diretorio.i_numero[j];	
+				{
+					i_node_dir_atual = endereco_dir;
+					i_node_atual = disco[endereco_dir].diretorio.i_numero[j];
+				}
+							
 				
 				else
 					caminho_valido=0;
@@ -733,7 +830,8 @@ char buscar_inode(Block disco[], int endereco_inode_dir_raiz ,int *endereco_inod
 	
 	if(caminho_valido)
 	{
-		*endereco_inode_dir_atual = i_node_atual;	
+		*endereco_inode_dir_atual = i_node_dir_atual;	
+		*endereco_inode_atual = i_node_atual;
 		return 1;
 	}
 	
@@ -807,16 +905,23 @@ void split_funcao_criar_diretorio(char nome_arquivo[], char caminho[], char cmd_
 	//RETIRA MKDIR
 	for(i=0 ; cmd_full[i] != '\0' && cmd_full[i] != '\0' && cmd_full[i] != ' '; i++);
 	
-	if(cmd_full[i] == ' ')
+	//TRATA ESPACO
+	while(cmd_full[i] == ' ') 
 		i++;
 	
 	for(j=0 ; cmd_full[i] != '\0' && cmd_full[i] != '\0'; i++, j++)
 		cmd_full[j] = cmd_full[i];
 	cmd_full[j] = '\0';
 	
+	
 	//PEGA NOME DO ARQUIVO
 	j=0;	
 	i=strlen(cmd_full)-1;			
+	
+	//TRATA ESPACO
+	while(cmd_full[i] == ' ') 
+		i--;
+	
 	while(i >= 0 && cmd_full[i] != '/')
 	{
 		aux[j] = cmd_full[i];
@@ -829,17 +934,44 @@ void split_funcao_criar_diretorio(char nome_arquivo[], char caminho[], char cmd_
 	//PEGA CAMINHO DO DIRETORIO, SE OUVER
 	if(i >= 0 && cmd_full[i] == '/')
 	{
-		
-		i--;
+			
+		//TRATA ESPACO
+		while(cmd_full[i] == ' ' || cmd_full[i] == '/' ) 
+			i--;
+			
+//		i--;
 		j=0;
-		while(i >= 0)
+		while(i >= 0 && cmd_full[i] != ' ')
 		{
-			caminho[j] = cmd_full[i];
+			aux[j] = cmd_full[i];
 			i--;
 			j++;
 		}
-		caminho[j] = '\0';
+		aux[j] = '\0';
+		inverter_string(caminho, aux);
 	}	
+}
+
+char nome_igual_diretorio(Block disco[], int endereco_inode_dir_atual, char nome_arquivo[], int dir_extendido)
+{
+	int endereco_estrutura,
+		i;
+	
+	if(!dir_extendido)
+		endereco_estrutura = disco[endereco_inode_dir_atual].inode.b_diretos[0];
+	else
+		endereco_estrutura = endereco_inode_dir_atual;
+	
+	for(i=0 ; i < disco[endereco_estrutura].diretorio.tl && i < 12  && 
+		strcmp(disco[endereco_estrutura].diretorio.nome_arq[i], nome_arquivo) != 0; i++);
+		
+	if(i < disco[endereco_estrutura].diretorio.tl && i < 12  && 
+		strcmp(disco[endereco_estrutura].diretorio.nome_arq[i], nome_arquivo) == 0)
+		return 1;
+	else if(i < disco[endereco_estrutura].diretorio.tl && i == 12) //PROCURA NO DIRETORIO EXTENDIDO
+		return 	nome_igual_diretorio(disco, disco[endereco_estrutura].diretorio.i_numero[12], nome_arquivo, 1);
+	else
+		return 0;	
 }
 
 // funcao mkdir nome dir
@@ -849,6 +981,8 @@ void criar_diretorio(Block disco[], int * topo_blocks_free,int endereco_inode_di
 	char nome_arquivo[255],
 		 caminho[255];
 	
+	int endereco_inode_atual;
+	
 	split_funcao_criar_diretorio(nome_arquivo, caminho, comando);
 	
 	//VERIFICA NOME DO DIRETORIO
@@ -857,13 +991,20 @@ void criar_diretorio(Block disco[], int * topo_blocks_free,int endereco_inode_di
 		if(strlen(caminho) > 0)
 		{
 			//BUSCA ESSE CAMINHO, SE EXISTIR
-			if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual, caminho))
+			if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_atual ,&endereco_inode_dir_atual, caminho))
 			{
 				//VERIFICA SE O CAMINHO EH DIRETORIO
-				if(disco[endereco_inode_dir_atual].inode.permissoes[0] == 'd')
-				{// minimo para criar um diretorio, 1 block para inode outro para estrutura de dir
-					if(quantidade_blocks_livres(disco, *topo_blocks_free) >= 2)
-						inserir_diretorio_in_estrutura_diretorio(disco, &*topo_blocks_free, endereco_inode_dir_atual, nome_arquivo);
+				if(disco[endereco_inode_atual].inode.permissoes[0] == 'd')
+				{
+					if(!nome_igual_diretorio(disco, endereco_inode_atual, nome_arquivo, 0))
+					{
+						// minimo para criar um diretorio, 1 block para inode outro para estrutura de dir
+						if(quantidade_blocks_livres(disco, *topo_blocks_free) >= 2)
+							inserir_diretorio_in_estrutura_diretorio(disco, &*topo_blocks_free, endereco_inode_atual, nome_arquivo, 0);	
+					}
+					else
+						printf("NOME DE ARQUIVO JA EXISTE.\n");
+					
 				}
 				else
 					printf("ESPACO EM DISCO INSUFICIENTE.\n");
@@ -873,11 +1014,18 @@ void criar_diretorio(Block disco[], int * topo_blocks_free,int endereco_inode_di
 		}
 		else
 		{
-			// minimo para criar um diretorio, 1 block para inode outro para estrutura de dir		
-			if(quantidade_blocks_livres(disco, *topo_blocks_free) >= 2)
-				inserir_diretorio_in_estrutura_diretorio(disco, &*topo_blocks_free, endereco_inode_dir_atual, nome_arquivo);
+			
+			//BUSCA ESSE CAMINHO, SE EXISTIR
+			if(!nome_igual_diretorio(disco, endereco_inode_dir_atual, nome_arquivo, 0))
+			{
+				// minimo para criar um diretorio, 1 block para inode outro para estrutura de dir		
+				if(quantidade_blocks_livres(disco, *topo_blocks_free) >= 2)
+					inserir_diretorio_in_estrutura_diretorio(disco, &*topo_blocks_free, endereco_inode_dir_atual, nome_arquivo, 0);
+				else
+					printf("ESPACO EM DISCO INSUFICIENTE.\n");
+			}
 			else
-				printf("ESPACO EM DISCO INSUFICIENTE.\n");
+				printf("NOME DE ARQUIVO JA EXISTE.\n");
 		}
 	}
 	else
@@ -885,31 +1033,58 @@ void criar_diretorio(Block disco[], int * topo_blocks_free,int endereco_inode_di
 }
 
 //funcao ls
-void listar_diretorio(Block disco[], int endereco_dir_atual)
+void listar_diretorio(Block disco[], int endereco_inode_dir_atual, int extendido)
 {
 	int endereco_struct_dir,
 		i,
 		j,
-		tl_dir;
+		tl_dir,
+		endereco_struct_extend;
 	
-	endereco_struct_dir = disco[endereco_dir_atual].inode.b_diretos[0];
+	if(extendido)
+		endereco_struct_dir = endereco_inode_dir_atual;
+	else
+		endereco_struct_dir = disco[endereco_inode_dir_atual].inode.b_diretos[0];
 	
-	for(i=0 ; i < disco[endereco_struct_dir].diretorio.tl ; i++)
-		printf("%s\n", disco[endereco_struct_dir].diretorio.nome_arq[i]);
+	for(i=0 ; i < disco[endereco_struct_dir].diretorio.tl && i < 12 ; i++)
+	{
+		if(strcmp(disco[endereco_struct_dir].diretorio.nome_arq[i], ".") != 0 && 
+			strcmp(disco[endereco_struct_dir].diretorio.nome_arq[i], "..") !=  0)
+		{
+			printf("%s\n", disco[endereco_struct_dir].diretorio.nome_arq[i]);
+		}
+		else if(!extendido)
+			printf("%s\n" , disco[endereco_struct_dir].diretorio.nome_arq[i]);	
+	}
+		
+//	textcolor(15);
+	
+	if(i == 12)
+	{
+		endereco_struct_extend = disco[endereco_struct_dir].diretorio.i_numero[i];
+		listar_diretorio(disco, endereco_struct_extend, 1);
+	}
+		
+	
+//	textcolor(15);	
 }
 
 //funcao ls -l
-void listar_diretorio_atributos(Block disco[], int endereco_dir_atual)
+void listar_diretorio_atributos(Block disco[], int endereco_inode_dir_atual, int extendido)
 {
 	int endereco_struct_dir,
 		endereco_inode,
 		i,
 		j,
-		tl_dir;
+		tl_dir,
+		endereco_struct_extend;
 	
-	endereco_struct_dir = disco[endereco_dir_atual].inode.b_diretos[0];
+	if(extendido)
+		endereco_struct_dir = endereco_inode_dir_atual;
+	else
+		endereco_struct_dir = disco[endereco_inode_dir_atual].inode.b_diretos[0];
 	
-	for(i=0 ; i < disco[endereco_struct_dir].diretorio.tl ; i++)
+	for(i=0 ; i < disco[endereco_struct_dir].diretorio.tl && i < 12 ; i++)
 	{
 		if(strcmp(disco[endereco_struct_dir].diretorio.nome_arq[i], ".") != 0 && 
 			strcmp(disco[endereco_struct_dir].diretorio.nome_arq[i], "..") !=  0)
@@ -924,24 +1099,31 @@ void listar_diretorio_atributos(Block disco[], int endereco_dir_atual)
 			printf("%5d ", disco[endereco_inode].inode.tamanho/10);
 			printf("%s ", disco[endereco_inode].inode.data);
 			printf("%s ", disco[endereco_inode].inode.hora);
-			
-			//COR DIFERENTE POR TIPO DE ARQUIVO
-			if(disco[endereco_inode].inode.permissoes[0] == '-')
-				textcolor(5);
-			else if(disco[endereco_inode].inode.permissoes[0] == 'd')
-				textcolor(6);
-			else
-				textcolor(7);
+			//
+//			//COR DIFERENTE POR TIPO DE ARQUIVO
+//			if(disco[endereco_inode].inode.permissoes[0] == '-')
+//				textcolor(5);
+//			else if(disco[endereco_inode].inode.permissoes[0] == 'd')
+//				textcolor(6);
+//			else
+//				textcolor(7);
 			printf("%s\n" , disco[endereco_struct_dir].diretorio.nome_arq[i]);
 			
-			textcolor(15);	
+//			textcolor(15);	
 													 
 		}
-		else
-			printf("%s\n" , disco[endereco_struct_dir].diretorio.nome_arq[i]);
+		else if(!extendido)
+			printf("%s\n" , disco[endereco_struct_dir].diretorio.nome_arq[i]);	
 	}
 	
-	textcolor(15);	
+	
+	if(i == 12)
+	{
+		endereco_struct_extend = disco[endereco_struct_dir].diretorio.i_numero[i];
+		listar_diretorio_atributos(disco, endereco_struct_extend, 1);
+	}
+		
+//	textcolor(15);	
 }
 
 void ls_and_lsl(Block disco[], int endereco_dir_atual, char comando[])
@@ -961,22 +1143,23 @@ void ls_and_lsl(Block disco[], int endereco_dir_atual, char comando[])
 	}
 	
 	if(lsl)
-		listar_diretorio_atributos(disco, endereco_dir_atual);
+		listar_diretorio_atributos(disco, endereco_dir_atual, 0);
 	else
-		listar_diretorio(disco, endereco_dir_atual);
+		listar_diretorio(disco, endereco_dir_atual, 0);
 		
-}
+	}
 
 //funcao chmod 
 void chmod(Block disco[], int endereco_inode_dir_raiz ,int endereco_inode_dir_atual, char comando[])
 {
 	char arquivo[255],
 		 argumento_comando[255];
+	int aux;
 		 
 	split_comando_chmod(comando, arquivo, argumento_comando);
 	
 	//BUSCAR INODE DO ARQUIVO OU DIRETORIO
-	if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual,arquivo))
+	if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual, &aux, arquivo))
 		//MUDAR PERMISSAO DO ARQUIVO OU DIRETORIO
 		mudar_permissao(disco, endereco_inode_dir_atual, argumento_comando);
 	else
@@ -1104,11 +1287,12 @@ void split_comando_vi(char caminho[], char end_split[])
 void visualizar_arquivo_regular(Block disco[], int endereco_inode_raiz, int endereco_inode_dir_atual, char caminho[])
 {
 	char endereco_split[255];
+	int aux;
 		 
 	split_comando_vi(caminho, endereco_split);
 	
 	//BUSCAR INODE DO ARQUIVO
-	if(buscar_inode(disco, endereco_inode_raiz, &endereco_inode_dir_atual, endereco_split))
+	if(buscar_inode(disco, endereco_inode_raiz, &endereco_inode_dir_atual, &aux , endereco_split))
 		if(disco[endereco_inode_dir_atual].inode.permissoes[0] == '-' && 
 			verificar_consistencia_arquivo(disco, endereco_inode_dir_atual))
 			printf("Arquivo Ok\n");
@@ -1147,7 +1331,8 @@ void rmdir(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, i
 {
 	char nome_arquivo[255],
 		 caminho[255];
-	int endereco_struct_dir;
+	int endereco_struct_dir,
+		aux;
 	
 	split_funcao_criar_diretorio(nome_arquivo, caminho, str_comando);
 	
@@ -1157,10 +1342,10 @@ void rmdir(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, i
 		if(strlen(caminho) > 0)
 		{
 			//BUSCA ESSE CAMINHO, SE EXISTIR
-			if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual, caminho))
+			if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual, &aux ,caminho))
 			{			
 				//VERIFICA SE O CAMINHO EH DIRETORIO
-				//PRECISA CHEGAR A PERMISSAO
+				//PRECISA CHECAR A PERMISSAO
 				if(disco[endereco_inode_dir_atual].inode.permissoes[0] == 'd')
 				{
 					endereco_struct_dir = disco[endereco_inode_dir_atual].inode.b_diretos[0];
@@ -1178,7 +1363,7 @@ void rmdir(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, i
 		else
 		{
 			//BUSCA ESSE CAMINHO, SE EXISTIR
-			if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual, nome_arquivo))
+			if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual, &aux ,caminho))
 			{
 				//VERIFICA SE O CAMINHO EH DIRETORIO
 				//PRECISA CHEGAR A PERMISSAO
@@ -1201,10 +1386,244 @@ void rmdir(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, i
 		printf("COMANDO ESTA ERRADO.");
 }
 
-//função - rm
-void deletar_arquivo(Block disco[], int endereco_inode_raiz, int endereco_inode_dir_atual, char caminho[])
+
+void deletar_arquivo(Block disco[], int * topo_blocks_free, int endereco_inode_atual, int *quantidade_blocos);
+
+void remover_inode_extend_simples(Block disco[], int * topo_blocks_free, int endereco_inode_atual_simples, 
+								  int *quantidade_blocos, int * cont_blocks)
 {
+	int i,
+		endereco_blocos;
 	
+	for(i=0 ; i < 5 && *quantidade_blocos > 0 && *cont_blocks < 159; i++)
+	{
+//		printf("i:%d qnt_blocos:%d cont_blocks:%d\n", i, *quantidade_blocos, *cont_blocks);
+		//ALOCA DENTRO DA LISTA DA ESTRUTURA DE INODE EXTENDIDO
+		endereco_blocos = disco[endereco_inode_atual_simples].inode_extend.b_diretos[i];
+		disco[endereco_inode_atual_simples].inode_extend.b_diretos[i] = 0;
+		
+		//INSERE BLOCO FREE DE VOLTA	
+		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
+		
+		(*cont_blocks)++;
+//		printf("bytes: %d, blocos: %d\n", *quantidade_bytes, *cont_blocks);
+		
+		if(i < 5 && *quantidade_blocos > 0 && *cont_blocks < 159)
+		 (*quantidade_blocos)--;
+	}
+	
+	if(*cont_blocks == 159)
+	{		
+		//ALOCA DENTRO DA LISTA DA ESTRUTURA DE INODE EXTENDIDO
+		endereco_blocos = disco[endereco_inode_atual_simples].inode_extend.b_diretos[4];
+		
+		//CRIA ARQUIVO REGULAR EM DISCO
+		deletar_arquivo(disco, &*topo_blocks_free, endereco_blocos, &*quantidade_blocos);
+		
+		//INSERE BLOCO FREE DE VOLTA	
+		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
+	}
+}
+
+void remover_inode_extend_duplo(Block disco[], int * topo_blocks_free,
+								int endereco_inode_atual_duplo, int *quantidade_block_indireto, 
+								int * cont_blocks)
+{
+	int i,
+		endereco_blocos;
+	
+	for(i=0 ; i < 5 && *quantidade_block_indireto > 0 ; i++)
+	{
+		//ALOCA DENTRO DA LISTA DA ESTRUTURA DE INODE EXTENDIDO
+		endereco_blocos = disco[endereco_inode_atual_duplo].inode_extend.b_diretos[i];
+		
+		//INSERIR OS INDIRETOS SIMPLES
+		remover_inode_extend_simples(disco, &*topo_blocks_free, endereco_blocos, 
+									 &*quantidade_block_indireto, &*cont_blocks);
+		
+		//INSERE BLOCO FREE DE VOLTA	
+		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
+		disco[endereco_inode_atual_duplo].inode_extend.b_diretos[i] = 0;
+		
+//		(cont_blocks)++;
+//		printf("bytes: %d, blocos: %d\n", *quantidade_block_indireto, *cont_blocks);
+	}
+}
+
+void remover_inode_extend_triplo(Block disco[], int * topo_blocks_free, int endereco_inode_atual_triplo, 
+								 int *quantidade_block_indireto, int * cont_blocks)
+{
+	int i,
+		endereco_blocos;
+	
+	for(i=0 ; i < 5 && *quantidade_block_indireto > 0 ; i++)
+	{
+		//PEGA ENDERECO DENTRO DA LISTA DA ESTRUTURA DE INODE EXTENDIDO
+		endereco_blocos = disco[endereco_inode_atual_triplo].inode_extend.b_diretos[i];
+		
+		//INSERIR OS INDIRETOS SIMPLES
+		remover_inode_extend_duplo(disco, &*topo_blocks_free, endereco_blocos, 
+									 &*quantidade_block_indireto, &*cont_blocks);
+		
+		//INSERE BLOCO FREE DE VOLTA	
+		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
+		disco[endereco_inode_atual_triplo].inode_extend.b_diretos[i] = 0;
+		
+//		(*cont_blocks)++;
+//		printf("bytes: %d, blocos: %d\n", *quantidade_block_indireto, *cont_blocks);
+	}
+}
+
+void deletar_arquivo(Block disco[], int * topo_blocks_free, int endereco_inode_atual, int *quantidade_blocos)
+{
+	int endereco_blocos,
+		cont_blocks,
+		i;
+	
+	if(*quantidade_blocos == -1)
+		*quantidade_blocos = disco[endereco_inode_atual].inode.tamanho / 10;
+	
+//	printf("%d\n", (*quantidade_blocos));
+
+	cont_blocks = 0;
+	
+	//REMOVER OS BLOCOS DIRETOS QNTD = 5
+	for(i=0 ; i < 5 && i < *quantidade_blocos ; i++, (*quantidade_blocos)--)
+	{
+		
+//		printf("qntd blocos: %d, i=%d\n", (*quantidade_blocos), i);
+		
+		//PEGA ENDERECO DO BLOCO NA VARIAVEL QUE APONTA
+		endereco_blocos = disco[endereco_inode_atual].inode.b_diretos[i];
+		disco[endereco_inode_atual].inode.b_diretos[i] = 0;
+		
+		//ENVIA PARA BLOCOS LIVRES
+		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
+		
+		cont_blocks++;
+		
+		
+//		printf("qntd blocos: %d, i=%d\n", (*quantidade_blocos), i);
+	}
+	
+	//BLOCOS INDIRETOS SIMPLES QNTD = 5 extend
+	if(*quantidade_blocos > 0)
+	{
+		endereco_blocos = disco[endereco_inode_atual].inode.b_indi_simples;
+		remover_inode_extend_simples(disco, &*topo_blocks_free, endereco_blocos, &*quantidade_blocos, &cont_blocks);	
+		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
+		disco[endereco_inode_atual].inode.b_indi_simples = 0;
+	}
+
+	//BLOCOS INDIRETOS DUPLO QNTD = 5*5 extend
+	if(*quantidade_blocos > 0)
+	{
+		endereco_blocos = disco[endereco_inode_atual].inode.b_indi_duplo;
+		remover_inode_extend_duplo(disco, &*topo_blocks_free, endereco_blocos, &*quantidade_blocos, &cont_blocks);	
+		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
+		disco[endereco_inode_atual].inode.b_indi_duplo = 0;
+	}
+	
+	
+	//BLOCO INDIRETO TRIPLO QNTD = 5*5*5 extend
+	//FALTA TRATAR O ULTIMO ENDERECO CASO O NUMERO DE BLOCOS SE PASSE de 624
+	if(*quantidade_blocos > 0)
+	{
+		endereco_blocos = disco[endereco_inode_atual].inode.b_indi_triplo;
+		remover_inode_extend_triplo(disco, &*topo_blocks_free, endereco_blocos, &*quantidade_blocos, &cont_blocks);	
+		push_lista_block(disco, &*topo_blocks_free, endereco_blocos);
+		disco[endereco_inode_atual].inode.b_indi_triplo = 0;
+	}
+}
+
+
+void retirar_arquivo_da_estrutua_diretorio(Block disco[], int endereco_inode_dir, int endereco_inode_arquivo)
+{
+	int i,
+		j;
+	
+	//PROCURA NUMERO DO INODE DO ARQUIVO
+	for(i=0 ; i < disco[endereco_inode_dir].diretorio.tl && 
+		disco[endereco_inode_dir].diretorio.i_numero[i] != endereco_inode_arquivo; i++);
+	
+	//SE ACHOU REMANEJA OS ELEMENTOS ATE TL-1	
+	if(i < disco[endereco_inode_dir].diretorio.tl && 
+		disco[endereco_inode_dir].diretorio.i_numero[i] == endereco_inode_arquivo)
+	{
+		while(i < disco[endereco_inode_dir].diretorio.tl-1)
+		{
+			printf("1:%s 2:%s\n\n", disco[endereco_inode_dir].diretorio.nome_arq[i], disco[endereco_inode_dir].diretorio.nome_arq[i+1]);
+			strcpy(disco[endereco_inode_dir].diretorio.nome_arq[i], disco[endereco_inode_dir].diretorio.nome_arq[i+1]);	
+			disco[endereco_inode_dir].diretorio.i_numero[i] = disco[endereco_inode_dir].diretorio.i_numero[i+1];
+			i++;
+		}
+		disco[endereco_inode_dir].diretorio.tl--;
+	}
+}
+
+//função - rm
+void rm(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, int endereco_inode_dir_atual, char str_comando[])
+{
+	char nome_arquivo[255],
+		 caminho[255];
+		 
+	int endereco_inode,
+		quantidade_blocos,
+		aux;
+	
+	split_funcao_criar_diretorio(nome_arquivo, caminho, str_comando);
+	
+	
+	//VERIFICA NOME DO DIRETORIO
+	if(strlen(nome_arquivo) > 0)
+	{	//VERIFICA CAMINHO SE OUVER
+		if(strlen(caminho) > 0)
+		{
+			//BUSCA ESSE CAMINHO, SE EXISTIR
+			if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode, &endereco_inode_dir_atual, caminho))
+			{			
+				//VERIFICA SE O CAMINHO EH DIRETORIO
+				//PRECISA CHEGAR A PERMISSAO
+				if(disco[endereco_inode].inode.permissoes[0] == '-')
+				{
+//					endereco_inode = disco[endereco_inode_dir_atual].inode.b_diretos[0];
+					
+					quantidade_blocos = -1; //VARIAVEL USADA NA RECURSAO
+					deletar_arquivo(disco, &*topo_blocks_free, endereco_inode, &quantidade_blocos);
+					
+					retirar_arquivo_da_estrutua_diretorio(disco, endereco_inode_dir_atual, endereco_inode);
+				}
+				else
+					printf("IMPOSSIVEL APAGAR, NAO ARQUIVO.\n");
+			}
+			else
+				printf("CAMINHO ESPECIFICADO NAO VALIDO.");		
+		}
+		else
+		{
+			//BUSCA ESSE CAMINHO, SE EXISTIR
+			if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode, &endereco_inode_dir_atual, nome_arquivo))
+			{			
+				//VERIFICA SE O CAMINHO EH DIRETORIO
+				//PRECISA CHEGAR A PERMISSAO
+				if(disco[endereco_inode].inode.permissoes[0] == '-')
+				{
+//					endereco_inode = disco[endereco_inode_dir_atual].inode.b_diretos[0];
+					
+					quantidade_blocos = -1; //VARIAVEL USADA NA RECURSAO
+					deletar_arquivo(disco, &*topo_blocks_free, endereco_inode, &quantidade_blocos);
+					
+					retirar_arquivo_da_estrutua_diretorio(disco, endereco_inode_dir_atual, endereco_inode);
+				}
+				else
+					printf("IMPOSSIVEL APAGAR, NAO ARQUIVO.\n");
+			}
+			else
+				printf("CAMINHO ESPECIFICADO NAO VALIDO.");		
+		}
+	}
+	else
+		printf("COMANDO ESTA ERRADO.");
 }
 
 
@@ -1313,6 +1732,20 @@ void tornar_badblock(Block disco[], int num_block)
 	disco[num_block].tipo = 'B';
 }
 
+char is_number(char str[]) 
+{
+	int i;
+	
+	i=0;
+    while(str[i] != '\0')
+    {
+        if(str[i] < '0' || str[i] > '9')
+            return 0;
+        i++;
+    }
+    return 1;
+}
+
 //função bad
 void bad(Block disco[], int tf_disco, int endereco_inode_raiz, int endereco_inode_dir_atual, char commando_inteiro[])
 {
@@ -1327,98 +1760,218 @@ void bad(Block disco[], int tf_disco, int endereco_inode_raiz, int endereco_inod
 	else
 		printf("BLOCO NAO EXISTE");
 }
+//
+//void split_comando_touch1(char nome_arquivo[], int *qntd_blocos, char cmd[])
+//{
+//	int i,
+//		j;
+//	char number[5];
+//	
+//	number[0]='\0';
+//	//splita comando touch
+//	i=0;
+//	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] != ' ' )
+//		i++;
+//	
+//	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] == ' ' )
+//		i++;
+//	
+//	//splita nome_arquivo
+//	j=0;
+//	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] != ' ' )
+//	{
+//		nome_arquivo[j] = cmd[i];
+//		i++;
+//		j++;
+//	}
+//	nome_arquivo[j] = '\0';
+//	
+//	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] == ' ' )
+//		i++;
+//	
+//	//splita qntd bytes
+//	j=0;
+//	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] != ' ' )
+//	{
+//		number[j] = cmd[i];
+//		i++;
+//		j++;
+//	}
+//	number[j] = '\0';
+//	
+//	if(strlen(number) > 0)
+//		*qntd_blocos = atoi(number);	
+//}
 
-void split_comando_touch(char nome_arquivo[], int *qntd_blocos, char cmd[])
+void split_comando_touch(char nome_arquivo[], char caminho[], int *qntd_bytes, char cmd[])
 {
 	int i,
 		j;
-	char number[5];
+	char number[7],
+		 aux[255];
 	
 	number[0]='\0';
-	//splita comando
+	//splita comando touch
 	i=0;
-	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] != ' ' )
-		i++;
 	
+	//TRATA ESPACO
 	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] == ' ' )
 		i++;
 	
-	//splita nome_arquivo
-	j=0;
 	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] != ' ' )
-	{
-		nome_arquivo[j] = cmd[i];
 		i++;
-		j++;
-	}
-	nome_arquivo[j] = '\0';
 	
+	//TRATA ESPACO
 	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] == ' ' )
 		i++;
-	
-	//splita qntd bytes
+		
 	j=0;
-	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] != ' ' )
+	while(cmd[i] != '\0' && cmd[i] != '\n')
 	{
-		number[j] = cmd[i];
+		cmd[j] = cmd[i];
 		i++;
 		j++;
 	}
-	number[j] = '\0';
+	cmd[j] = '\0';
+	
+	//PEGA NUMBERO DE BYTES
+	i = strlen(cmd)-1;
+	j=0;
+	
+	//TRATA ESPACO
+	while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] == ' ' )
+		i--;
+	
+	while(i >= 0 && cmd[i] != '/' && cmd[i] != ' ')
+	{
+		aux[j] = cmd[i];
+		i--;
+		j++;	
+	}	
+	aux[j] = '\0';
+	inverter_string(number, aux);
 	
 	if(strlen(number) > 0)
-		*qntd_blocos = atoi(number);	
+	{
+		if(is_number(number))
+			*qntd_bytes = atoi(number);	
+		
+		//TRATA ESPACO
+		while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] == ' ' )
+			i--;
+		
+		//PEGA NOME DO ARQUIVO
+		j=0;
+		while(i >= 0 && cmd[i] != '/' && cmd[i] != ' ')
+		{
+			aux[j] = cmd[i];
+			i--;
+			j++;	
+		}	
+		aux[j] = '\0';
+		inverter_string(nome_arquivo, aux);
+		
+		if(i >= 0)
+		{
+			
+			//TRATA ESPACO
+			while(cmd[i] != '\0' && cmd[i] != '\n' && cmd[i] == ' ' || cmd[i] == '/')
+				i--;
+			
+			//PEGA CAMINHO DO DIRETORIO
+			j=0;
+			while(i >= 0 && cmd[i] != ' ')
+			{
+				aux[j] = cmd[i];
+				i--;
+				j++;	
+			}	
+			aux[j] = '\0';
+			inverter_string(caminho, aux);
+		}
+	}
 }
 
 //função touch
 void touch( Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, 
 			int inode_endereco_dir_atual, char comando[255])
 {
-	char nome_arquivo[255];
+	char nome_arquivo[255],
+		 caminho[255];
+		 
 	int quantidade_bytes_user,
 		qntd_blocos_livres,
 		num_int,
 		qnt_blocos,
-		resto;
+		resto,
+		endereco_inode_atual;
 	
 	float div;
 			
 	nome_arquivo[0] = '\0';
+	caminho[0] = '\0';
 	quantidade_bytes_user = -1;
 	
-	split_comando_touch(nome_arquivo, &quantidade_bytes_user, comando);
+	split_comando_touch(nome_arquivo, caminho, &quantidade_bytes_user, comando);
 	
 	if(strlen(nome_arquivo) > 0)
 	{
 		if(quantidade_bytes_user > -1)
 		{
-			num_int = (int) quantidade_bytes_user / 10;
-			div = (float) quantidade_bytes_user / 10;
-			resto = (div - num_int) * 10;
+			//TENHO 103 BYTES
+			num_int = (int) quantidade_bytes_user / 10; //PARTE INTEIRA = 10
+			div = (float) quantidade_bytes_user / 10; //PARTE FLOAT 10.3
+			resto = (div - num_int) * 10; //(10.3 - 10) = 0.3 => 0.3 * 10 = 30
 			
 			if(resto > 0)
-				qnt_blocos = (quantidade_bytes_user / 10)+1;
-			else	
-				qnt_blocos = (quantidade_bytes_user / 10);
+				qnt_blocos = (quantidade_bytes_user / 10)+1; //(103/10)+1 = 11 INTEIRO
+ 			else	
+				qnt_blocos = (quantidade_bytes_user / 10); //(103/10) = 10 INTEIRO
 			
 			//minimo para criar um arquivo, 1 bloco para inode	
 			qntd_blocos_livres = quantidade_blocks_livres(disco, *topo_blocks_free);
 			if(qntd_blocos_livres >=  qnt_blocos + 1) 
 			{
-				inserir_arquivo_in_estrutura_diretorio(disco, &*topo_blocks_free, inode_endereco_dir_atual, 
-													   nome_arquivo, quantidade_bytes_user);
+				if(strlen(caminho) > 0)
+				{
+					//BUSCA CAMINHO DO DIRETORIO
+					if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_atual, &inode_endereco_dir_atual, caminho))
+					{
+						//VERIFICA SE O INODE ACHADO EH UM DIRETORIO
+						if(disco[endereco_inode_atual].inode.permissoes[0] == 'd')
+						{
+							//VERIFICA NOME IGUAL NO DIRETORIO
+	/*CODIGO HADUKEN*/		if(!nome_igual_diretorio(disco, endereco_inode_atual, nome_arquivo, 0))
+								inserir_arquivo_in_estrutura_diretorio(disco, &*topo_blocks_free, endereco_inode_atual, 
+															   			nome_arquivo, quantidade_bytes_user, 0);
+							else
+								printf("NOME JA EXISTE NESSE DIRETORIO.\n");
+						}
+							
+						else
+							printf("CAMINHO TEM QUE SER UM DIRETORIO.\n");							   			
+					}
+					else
+						printf("CAMINHO NAO EXISTE.\n");
+				}
+				else
+				{
+					//VERIFICA NOME IGUAL NO DIRETORIO
+					if(!nome_igual_diretorio(disco, inode_endereco_dir_atual, nome_arquivo, 0))
+								inserir_arquivo_in_estrutura_diretorio(disco, &*topo_blocks_free, inode_endereco_dir_atual, 
+																		nome_arquivo, quantidade_bytes_user, 0);
+					else
+						printf("NOME JA EXISTE NESSE DIRETORIO.\n");
+				}
 			}
 			else
-				printf("ESPACO EM DISCO INSUFICIENTE.");
+				printf("ESPACO EM DISCO INSUFICIENTE.\n");
 		}
 		else
 			printf("Digite uma quantidade de bytes para o touch\n");
 	}
 	else
 		printf("Digite corretamente o arquivo\n");
-		
-//	touch(disco, &*topo_blocks_free, inode_endereco_dir_atual, nome_arquivo, quantidade_blocos_user);		
-
 }
 
 void pega_funcao(char funcao[], char comando[])
@@ -1433,74 +1986,101 @@ void pega_funcao(char funcao[], char comando[])
 	funcao[i]='\0';
 }
 
+
 void ler_comando(Block disco[], int * topo_blocks_free, int tf_disco,int endereco_inode_dir_raiz, 
 				 int * endereco_inode_dir_atual)
 {
 	char funcao[30], 
 		 comando[255];
 	
+		
+	//PARA TESTE {
+	
+//	char *strings[] = {"mkdir diretorio1\0",
+//						"mkdir diretorio2\0",
+//						"mkdir diretorio3\0",
+//						"mkdir diretorio4\0",
+//						"mkdir diretorio5\0",
+//						"mkdir diretorio6\0",
+//						"mkdir diretorio7\0",
+//						"mkdir diretorio8\0",
+//						"mkdir diretorio9\0",
+//						"mkdir diretorio10\0",
+//						"mkdir diretorio11\0"};
+//	int i;
+//	
+//						
+//	int inode_num = disco[*endereco_inode_dir_atual].inode.b_diretos[0];
+//	
+//	listar_diretorio_atributos(disco, *endereco_inode_dir_atual);
+//	
+//	
+//	for(i=0 ; i < 11 ; i++)
+//		criar_diretorio(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, strings[i]);
+	
+	// }
 	while(strcmp(comando,"exit") != 0)
 	{
 		printf("[%s@%s]: ", NOME_USUARIO_PADRAO, NOME_GRUPO_PADRAO);
-		fflush(stdin); scanf("%[^\n]s", &comando);
+			fflush(stdin); scanf("%[^\n]s", &comando);
 	
-			if(strcmp(comando, "") != 0)
-			{
-				pega_funcao(funcao, comando);
+		if(strcmp(comando, "") != 0)
+		{
+			pega_funcao(funcao, comando);
+			
+			if(strcmp(funcao, "chmod") == 0)
+				chmod(disco, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
+			
+			else if(strcmp(funcao, "vi") == 0)
+				visualizar_arquivo_regular(disco, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
+			
+			else if(strcmp(funcao, "mkdir") == 0)	
+				criar_diretorio(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
+			
+			else if(strcmp(funcao, "rmdir") == 0)	
+				rmdir(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);	
+			
+			else if(strcmp(funcao, "rm") == 0)	
+				rm(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
+			
+			else if(strcmp(funcao, "cd") == 0)
+				mover_para_diretorio(disco, endereco_inode_dir_raiz, &*endereco_inode_dir_atual, comando);
+			
+			else if(strcmp(funcao, "bad") == 0)
+				bad(disco, tf_disco, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
+			
+			else if(strcmp(funcao, "touch") == 0)	
+				touch(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
+			
+			else if(strcmp(funcao, "ls") == 0)
+				ls_and_lsl(disco, *endereco_inode_dir_atual, comando);
+			
+	//		else if(strcmp(comando,"link") == 0)
+			//{
+	//			if(strcmp(nome, "-h") == 0 && strcmp(n1, "") != 0 && strcmp(n2, "") != 0)
+	//				link_fisico(n1,n2);
+	//			else
+	//				if(strcmp(nome, "-s") == 0 && strcmp(n1, "") != 0 && strcmp(n2, "") != 0)
+	//					link_simbolico(n1,n2);
+	//				else
+	//					printf("- Opcao de link  ou nomes de arquivos invalidos.");
+	//		}
+	//		else if(strcmp(comando,"unlink") == 0)
+			//{
+	//			if(strcmp(nome, "-h") == 0)
+	//				unlink_fisico();
+	//			else
+	//				if(strcmp(nome, "-s") == 0)
+	//					unlink_simbolico();
+	//				else
+	//					printf("- Opcao de link invalida.");
+	//		}
+			else if(strcmp(funcao, "clear") == 0)
+				system("cls");
 				
-				if(strcmp(funcao,"chmod") == 0)
-					chmod(disco, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
-				
-				else if(strcmp(funcao,"vi") == 0)
-					visualizar_arquivo_regular(disco, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
-				
-				else if(strcmp(funcao,"mkdir") == 0)	
-					criar_diretorio(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
-				
-				else if(strcmp(funcao,"rmdir") == 0)	
-					rmdir(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);	
-				
-		//		else if(strcmp(comando,"rm") == 0)	
-		//							deletar_arquivo(nome);
-				
-				else if(strcmp(funcao, "cd") == 0)
-					mover_para_diretorio(disco, endereco_inode_dir_raiz, &*endereco_inode_dir_atual, comando);
-				
-				else if(strcmp(funcao, "bad") == 0)
-					bad(disco, tf_disco, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
-				
-				else if(strcmp(funcao, "touch") == 0)	
-					touch(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
-				
-				else if(strcmp(funcao,"ls") == 0)
-					ls_and_lsl(disco, *endereco_inode_dir_atual, comando);
-				
-		//		else if(strcmp(comando,"link") == 0)
-				//{
-		//			if(strcmp(nome, "-h") == 0 && strcmp(n1, "") != 0 && strcmp(n2, "") != 0)
-		//				link_fisico(n1,n2);
-		//			else
-		//				if(strcmp(nome, "-s") == 0 && strcmp(n1, "") != 0 && strcmp(n2, "") != 0)
-		//					link_simbolico(n1,n2);
-		//				else
-		//					printf("- Opcao de link  ou nomes de arquivos invalidos.");
-		//		}
-		//		else if(strcmp(comando,"unlink") == 0)
-				//{
-		//			if(strcmp(nome, "-h") == 0)
-		//				unlink_fisico();
-		//			else
-		//				if(strcmp(nome, "-s") == 0)
-		//					unlink_simbolico();
-		//				else
-		//					printf("- Opcao de link invalida.");
-		//		}
-				else if(strcmp(funcao, "clear") == 0)
-					system("cls");
-					
-				else
-					printf("function not found\n");	
-			}
+			else
+				printf("function not found\n");	
+		}
 	}
 }
 
@@ -1534,43 +2114,6 @@ int main()
 	
 	
 	ler_comando(disco, &topo_blocks_free, tf_disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual);
-	
-	
-	////TESTES
-//	criar_arquivo(disco, &topo_blocks_free, endereco_inode_dir_atual, "arquivo_bin.bin\0", 20);
-//	criar_diretorio(disco, &topo_blocks_free, endereco_inode_dir_atual, "bin\0");
-//	
-////	listar_diretorio_atributos(disco, endereco_inode_dir_atual);
-//	
-//	mover_para_diretorio(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual, "bin\0");
-//	
-////	listar_diretorio_atributos(disco, endereco_inode_dir_atual);
-//	
-//	//printf("%d", disco[disco[endereco_inode_dir_atual].inode.b_diretos[0]].diretorio.tl);
-//	
-//	criar_arquivo(disco, &topo_blocks_free, endereco_inode_dir_atual, "arquivo_bin_dir_bin.bin\0", 15);
-//	criar_diretorio(disco, &topo_blocks_free, endereco_inode_dir_atual, "abc\0");
-//	
-//	mover_para_diretorio(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual, "abc\0");
-//	
-////	listar_diretorio_atributos(disco, endereco_inode_dir_atual);
-//	
-//	criar_arquivo(disco, &topo_blocks_free, endereco_inode_dir_atual, "arquivo_abc.bin\0", 20);
-//	criar_diretorio(disco, &topo_blocks_free, endereco_inode_dir_atual, "cba\0");
-//	
-//	
-//	mover_para_diretorio(disco, endereco_inode_dir_raiz, &endereco_inode_dir_atual, "/bin\0");
-//	
-//	listar_diretorio_atributos(disco, endereco_inode_dir_atual);
-//	
-//	chmod(disco, endereco_inode_dir_raiz, endereco_inode_dir_atual, "chmod +ug X /bin/abc\0");
-//	
-//	listar_diretorio_atributos(disco, endereco_inode_dir_atual);
-//	
-//	//TESTAR GERENCIAMENTO DE ESPACO LIVRE
-////	testar_lista_blocos(disco, topo_blocks_free);
-//	
-	
 }
 
 
