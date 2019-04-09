@@ -1,5 +1,11 @@
-fazer busca de inode (diretorio correto)
-verificar a existencia do arquivo naquele diretorio (nome repitido)
+TESTAR FUNCAO CD COM LINK SIMBOLICO
+TESTAR FUNCAO BUSCAR_INODE COM LINK SIMBOLICO
 
-codar link simbolico
-codar link fisico
+
+codar link simbolico (TESTAR) => VERIFICAR PERMISSAO DE ACESSO
+codar link fisico (EM PRODUCAO) => VERIFICAR PERMISSAO DE ACESSO 
+
+testar unlink simbolico => VERIFICAR PERMISSAO DE ACESSO
+testar unlink fisico => VERIFICAR PERMISSAO DE ACESSO
+
+FAZER RELATORIOS

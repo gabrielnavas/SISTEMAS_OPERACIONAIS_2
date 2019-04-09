@@ -75,6 +75,10 @@ struct block
 };
 typedef struct block Block;
 
+char verificar_consistencia_arquivo(Block Disco[], int i_num);
+void deletar_arquivo(Block disco[], int * topo_blocks_free, int endereco_inode_atual, int *quantidade_blocos);
+char nome_igual_diretorio(Block disco[], int endereco_inode_dir_atual, char nome_arquivo[], int dir_extendido);
+
 void inverter_string(char str2[], char str1[])
 {
 	int i,
@@ -360,7 +364,7 @@ void criar_inode_arquivo( Block disco[], int * topo_blocks_free, int endereco_in
 	strcpy(disco[endereco_inode_atual].inode.hora, __TIME__);
 	strcpy(disco[endereco_inode_atual].inode.nome_usuario, NOME_USUARIO_PADRAO);
 	strcpy(disco[endereco_inode_atual].inode.nome_grupo, NOME_GRUPO_PADRAO);
-	disco[endereco_inode_atual].inode.contador_link_hard = 1; //vc tinha razao andressa, terrorista.
+	disco[endereco_inode_atual].inode.contador_link_hard = 1;
 	
 	cont_blocks=0; //
 	
@@ -777,7 +781,8 @@ char buscar_inode(Block disco[], int endereco_inode_dir_raiz,
 		endereco_dir,
 		i,
 		j,
-		tl_caminhos;
+		tl_caminhos,
+		endereco_path_link_simb;
 	
 
 	
@@ -824,6 +829,16 @@ char buscar_inode(Block disco[], int endereco_inode_dir_raiz,
 					caminho_valido=0;
 			}
 		}
+		else if(disco[i_node_atual].inode.permissoes[0] == 'l')
+		{
+			//PEGO ENDERECO DO LINK SIMB
+			endereco_path_link_simb = disco[i_node_atual].inode.b_diretos[0];
+			
+			//CHAMO A MESMA FUNCAO REC COMO CAMINHO DO LINK SIMB
+			buscar_inode(disco, endereco_inode_dir_raiz, &*endereco_inode_atual, 
+							&*endereco_inode_dir_atual, disco[endereco_path_link_simb].link_simb.caminho);
+		}
+		
 		i++;
 	}	
 
@@ -868,29 +883,583 @@ char buscar_inode(Block disco[], int endereco_inode_dir_raiz,
 //	printf("\n\nQUANTIDADE BLOCOS LIVRES: %d\n", quantidade_blocks_livres(disco, topo_blocks_free));
 //}
 
+void inserir_link_fisico(Block disco[], int endereco_inode_origem, int endereco_inode_dir_destino, char nome_linkh_criar[])
+{
+	int tl_dir,
+		endereco_estrutura_diretorio_atual;
+	
+	//INCREMENTA NUMERO DE LINKS
+	disco[endereco_inode_dir_destino].inode.contador_link_hard++;
+	
+	//PEGA ENDERECO DA ESTRUTURA DO DIRETORIAL PARA INSERIR O NOME E O INODE NUMBER
+	endereco_estrutura_diretorio_atual = disco[endereco_inode_dir_destino].inode.b_diretos[0];
+	
+	tl_dir = disco[endereco_estrutura_diretorio_atual].diretorio.tl;
+//	printf("%s", disco[disco[ disco[endereco_dir_destino].diretorio.i_numero ].inode.b_diretos[0]].diretorio);
+	//INSERE NUMERO DO INODE DE ORIGEM
+	disco[endereco_estrutura_diretorio_atual].diretorio.i_numero[tl_dir] = endereco_inode_origem;
+	
+	//INSERE NOME DO LINK DESEJADO
+	strcpy(disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[tl_dir], nome_linkh_criar);
+	
+	//INCREMENTA QUANTIDADE
+	disco[endereco_estrutura_diretorio_atual].diretorio.tl++;
+}
+
+void split_funcao_comando_link(char caminho_origem[], char caminho_destino[], char nome_link_criar[], char cmd[])
+{
+	int i,
+		j;
+	
+	char aux[255];
+	
+	//PEGAR NOME DO LINK FISICO
+	i = strlen(cmd)-1;
+	
+	//TRATAR ESPACOS
+	while(i >= 0 && cmd[i] == ' ')
+		i--;
+	
+	j=0;
+	while(i >= 0 && cmd[i] != ' ' && cmd[i] != '/')
+	{
+		aux[j] = cmd[i];
+		i--;
+		j++;
+	}
+	aux[j] = '\0';
+	inverter_string(nome_link_criar, aux);
+//	printf("%s", nome_link_criar);
+		
+	
+	if(i >= 0 && strlen(nome_link_criar) > 0)
+	{
+		//TRATAR ESPACOS
+		while(i >= 0 && cmd[i] == ' ' || (cmd[i] == '/' && cmd[i-1] != ' '))
+			i--;
+		
+		//PEGAR DESTINO
+		j=0;
+		while(i >= 0 && cmd[i] != ' ')
+		{
+			aux[j] = cmd[i];
+			i--;
+			j++;
+		}	
+		aux[j] = '\0';
+		inverter_string(caminho_destino, aux);
+//		printf("%s", caminho_destino);
+		
+		if(i >= 0 && strlen(caminho_destino) > 0)
+		{
+			//TRATAR ESPACOS
+			while(i >= 0 && cmd[i] == ' ' || cmd[i] == '/')
+				i--;
+			
+			//PEGAR ORIGEM
+			j=0;
+			while(i >= 0 && cmd[i] != ' ')
+			{
+				aux[j] = cmd[i];
+				i--;
+				j++;
+			}	
+			aux[j] = '\0';
+			inverter_string(caminho_origem, aux);
+//			printf("%s", caminho_origem);
+		}
+		else
+		{
+			strcpy(caminho_origem, caminho_destino);
+			caminho_destino[0] = '\0';
+		}
+			
+	}
+}
 
 //função -  link –h  
-void link_fisico(char origem[15], char destino[15])
+void link_fisico(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, 
+					int endereco_inode_dir_atual, char comando[])
 {
+	//STRING COMANDO CONTEM PRIMEIRO O CAMINHO DA ORIGEM DO ARQUIVO E SEGUNDO O CAMINHO DESTINO DO LINK
 	
+	char caminho_origem[100],
+		 caminho_destino[100],
+		 nome_linkh_criar[100];
+	
+	int endereco_inode_atual,
+		endereco_inode_origem,
+		endereco_inode_dir_destino,
+		endereco_inode_dir_posicao_atual;
+	
+	
+	caminho_origem[0] = '\0';
+	caminho_destino[0] = '\0';
+	nome_linkh_criar[0] = '\0';
+	
+	endereco_inode_dir_posicao_atual = endereco_inode_dir_atual;
+	
+	split_funcao_comando_link(caminho_origem, caminho_destino, nome_linkh_criar, comando);
+	
+	
+	if(strlen(caminho_origem) > 0/* && strlen(caminho_destino) > 0*/)
+	{
+		//BUSCAR CAMINHO DE ORIGEM
+		if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_atual, &endereco_inode_dir_atual, caminho_origem))
+		{
+			//VERIFICA SE O CAMINHO DE ORIGEM EH UM ARQUIVO
+			if(disco[endereco_inode_atual].inode.permissoes[0] == '-')
+			{
+				//GUARDA O ENDERECO DE ORIGEM ACHADO
+				endereco_inode_origem = endereco_inode_atual;
+				
+				if(strlen(caminho_destino) > 0)
+				{
+					//BUSCAR CAMINHO DE DESTINO
+					if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_atual, &endereco_inode_dir_atual, caminho_destino))
+					{
+						//VERIFICA SE NO DIRETORIO DO DESTINO JA NAO TEM O NOME DESEJADO
+						if(!nome_igual_diretorio(disco, endereco_inode_atual, nome_linkh_criar, 0))
+						{
+							if(disco[endereco_inode_atual].inode.permissoes[0] == 'd')
+							{
+								//GUARDA O ENDERECO DO INODE DE DIRETORIO DESTINO ACHADO
+								endereco_inode_dir_destino = endereco_inode_atual;
+								
+								inserir_link_fisico(disco, endereco_inode_origem, endereco_inode_dir_destino, nome_linkh_criar);
+							}
+							else
+								printf("DESTINO TEM QUE SER UM ARQUIVO VALIDO");
+						}
+						else
+							printf("JA ESSE NOME EXISTE NO DIRETORIO DE DESTINO.\n");
+					}
+					else
+						printf("ENDERECO DO DESTINO NAO EXISTE.\n");
+				}
+				//NAO TEM CAMINHO DE ORIGEM, CRIAR LINK NO PROPRIO DIRETORIO ATUAL
+				else
+				{
+					//VERIFICA SE NO DIRETORIO DO DESTINO JA NAO TEM O NOME DESEJADO
+					if(!nome_igual_diretorio(disco, endereco_inode_dir_posicao_atual, nome_linkh_criar, 0))
+					{
+						//GUARDA O ENDERECO DO INODE DE DIRETORIO DESTINO ACHADO
+						endereco_inode_dir_destino = endereco_inode_dir_posicao_atual;
+						
+						inserir_link_fisico(disco, endereco_inode_origem, 
+							endereco_inode_dir_destino, nome_linkh_criar);
+			
+					}
+					else
+						printf("JA ESSE NOME EXISTE NO DIRETORIO DE DESTINO.\n");
+				}
+			}
+			else
+				printf("CAMINHO DE ORIGEM DEVE SER UM ARQUIVO");
+		}	
+	}
+	else
+		printf("NECESSARIO O CAMINHO DE ORIGEM.\n");
+	
+}
+
+void inserir_link_simbolico(Block disco[], int *topo_blocks_free, int endereco_inode_dir_destino, char nome_linkh_criar[], char caminho_completo[])
+{
+	int endereco_inode_link_simb,
+		endereco_estrutura_path_link,
+		endereco_estrutura_diretorio_atual,
+		tl_dir;
+	
+	//RETIRA ENDERECO PARA O INODE DO LINK
+	pop_lista_block(disco, &*topo_blocks_free, &endereco_inode_link_simb);
+	
+	//RETIRA ENDERECO PARA O PATH DO LINK
+	pop_lista_block(disco, &*topo_blocks_free, &endereco_estrutura_path_link);
+	
+	//PEGA ENDERECO DA ESTRUTURA DO DIRETORIAL PARA INSERIR O NOME E O INODE NUMBER
+	endereco_estrutura_diretorio_atual = disco[endereco_inode_dir_destino].inode.b_diretos[0];
+	
+	//TL DA ESTRUTURA ONDE SERA INSERIDO O NUMERO DO INODE E NOME DO LINK
+	tl_dir = disco[endereco_estrutura_diretorio_atual].diretorio.tl;
+	
+	//INSERE NUMERO DO INODE DE ORIGEM
+	disco[endereco_estrutura_diretorio_atual].diretorio.i_numero[tl_dir] = endereco_inode_link_simb;
+	
+	//INSERE NOME DO LINK DESEJADO
+	strcpy(disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[tl_dir], nome_linkh_criar);
+	
+	//INCREMENTA TL DO DIRETORIO
+	disco[endereco_estrutura_diretorio_atual].diretorio.tl++;
+	
+	//INSERIR DADOS NO INODE DO LINK
+	disco[endereco_inode_link_simb].inode.tamanho = 10;
+	strcpy(disco[endereco_inode_link_simb].inode.permissoes, "lrw-r--r--\0");
+	strcpy(disco[endereco_inode_link_simb].inode.data, __DATE__);
+	strcpy(disco[endereco_inode_link_simb].inode.hora, __TIME__);
+	strcpy(disco[endereco_inode_link_simb].inode.nome_usuario, NOME_USUARIO_PADRAO);
+	strcpy(disco[endereco_inode_link_simb].inode.nome_grupo, NOME_GRUPO_PADRAO);
+	disco[endereco_inode_link_simb].inode.contador_link_hard = 1;
+	
+	disco[endereco_inode_link_simb].inode.b_diretos[0] = endereco_estrutura_path_link;
+	
+	//INSERIR NOME DO PATH NA ESTRUTURA DO PATH
+	strcpy(disco[endereco_estrutura_path_link].link_simb.caminho, caminho_completo);
 }
 
 //função -  link –s
-void link_simbolico(char origem[15], char destino[15])
+void link_simbolico(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, int endereco_inode_dir_atual, char comando[])
 {
+	//STRING COMANDO CONTEM PRIMEIRO O CAMINHO DA ORIGEM DO ARQUIVO E SEGUNDO O CAMINHO DESTINO DO LINK
 	
+	char caminho_origem[100],
+		 caminho_destino[100],
+		 nome_linkh_criar[100],
+		 caminho_completo[100];
+	
+	int endereco_inode_atual,
+		endereco_inode_origem,
+		endereco_inode_dir_destino,
+		endereco_inode_dir_posicao_atual;
+	
+	
+	caminho_origem[0] = '\0';
+	caminho_destino[0] = '\0';
+	nome_linkh_criar[0] = '\0';
+	
+	
+	if(quantidade_blocks_livres(disco, *topo_blocks_free) >= 2)
+	{
+		endereco_inode_dir_posicao_atual = endereco_inode_dir_atual;
+		
+		split_funcao_comando_link(caminho_origem, caminho_destino, nome_linkh_criar, comando);
+		
+		
+		if(strlen(caminho_origem) > 0/* && strlen(caminho_destino) > 0*/)
+		{
+			if(strlen(caminho_destino) > 0)
+			{
+				//BUSCAR CAMINHO DE DESTINO
+				if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_atual, 
+									&endereco_inode_dir_atual, caminho_destino))
+				{
+					//VERIFICA SE NO DIRETORIO DO DESTINO JA NAO TEM O NOME DESEJADO
+					if(!nome_igual_diretorio(disco, endereco_inode_atual, nome_linkh_criar, 0))
+					{
+						if(disco[endereco_inode_atual].inode.permissoes[0] == 'd')
+						{
+							//GUARDA O ENDERECO DO INODE DE DIRETORIO DESTINO ACHADO
+							endereco_inode_dir_destino = endereco_inode_atual;
+							
+							//FAZER NOME COMPLETO
+							strcat(caminho_completo, caminho_destino);
+							strcat(caminho_completo, "/");
+							strcat(caminho_completo, nome_linkh_criar);
+							
+							//INSERIR
+							inserir_link_simbolico(disco, &*topo_blocks_free, endereco_inode_dir_destino, 
+													nome_linkh_criar, caminho_completo);
+						}
+						else
+							printf("DESTINO TEM QUE SER UM DIRETORIO VALIDO");
+					}
+					else
+						printf("JA ESSE NOME EXISTE NO DIRETORIO DE DESTINO.\n");
+				}
+				else
+					printf("ENDERECO DO DESTINO NAO EXISTE.\n");
+			}
+			//NAO TEM CAMINHO DE ORIGEM, CRIAR LINK NO PROPRIO DIRETORIO ATUAL
+			else
+			{
+				//VERIFICA SE NO DIRETORIO DO DESTINO JA NAO TEM O NOME DESEJADO
+				if(!nome_igual_diretorio(disco, endereco_inode_dir_posicao_atual, nome_linkh_criar, 0))
+				{
+					//GUARDA O ENDERECO DO INODE DE DIRETORIO DESTINO ACHADO
+					endereco_inode_dir_destino = endereco_inode_dir_posicao_atual;
+					
+					//INSERIR
+					inserir_link_simbolico(disco, &*topo_blocks_free, endereco_inode_dir_destino, nome_linkh_criar, nome_linkh_criar);
+				}
+				else
+					printf("JA ESSE NOME EXISTE NO DIRETORIO DE DESTINO.\n");
+			}	
+		}
+		else
+			printf("NECESSARIO O CAMINHO DE ORIGEM.\n");
+	}
+	else
+		printf("ESPACO INSUFICIENTE.\n");
+}
+
+void remover_link_fisico(Block disco[], int endereco_inode_dir_destino, char nome_linkh_criar[])
+{
+	int tl_dir,
+		endereco_estrutura_diretorio_atual,
+		i;
+	
+	//INCREMENTA NUMERO DE LINKS
+	disco[endereco_inode_dir_destino].inode.contador_link_hard--;
+	
+	//PEGA ENDERECO DA ESTRUTURA DO DIRETORIAL PARA INSERIR O NOME E O INODE NUMBER
+	endereco_estrutura_diretorio_atual = disco[endereco_inode_dir_destino].inode.b_diretos[0];
+	
+	tl_dir = disco[endereco_estrutura_diretorio_atual].diretorio.tl;
+//	printf("%s", disco[disco[ disco[endereco_dir_destino].diretorio.i_numero ].inode.b_diretos[0]].diretorio);
+	
+	
+	//INSERE NOME DO LINK DESEJADO
+	for(i=0 ; i < tl_dir && 
+				strcmp(disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[tl_dir], nome_linkh_criar ) != 0; i++);
+	
+	while(i < tl_dir-1 && 
+				strcpy(disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[tl_dir], nome_linkh_criar) == 0)
+	{
+		strcpy(disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[i],	
+			disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[i+1]);
+		
+		disco[endereco_estrutura_diretorio_atual].diretorio.i_numero[i] = 
+			disco[endereco_estrutura_diretorio_atual].diretorio.i_numero[i+1];
+		
+		i++;		
+	}	
+	
+	//DECREMENTA QUANTIDADE
+	disco[endereco_estrutura_diretorio_atual].diretorio.tl--;
+}
+
+void split_funcao_comando_unlink(char caminho_destino[], char nome_link_criar[], char cmd[])
+{
+	int i,
+		j;
+	
+	char aux[255];
+	
+	//PEGAR NOME DO LINK FISICO
+	i = strlen(cmd)-1;
+	
+	//TRATAR ESPACOS
+	while(i >= 0 && cmd[i] == ' ')
+		i--;
+	
+	j=0;
+	while(i >= 0 && cmd[i] != ' ' && cmd[i] != '/')
+	{
+		aux[j] = cmd[i];
+		i--;
+		j++;
+	}
+	aux[j] = '\0';
+	inverter_string(nome_link_criar, aux);
+//	printf("%s", nome_link_criar);
+		
+	
+	if(i >= 0 && strlen(nome_link_criar) > 0)
+	{
+		//TRATAR ESPACOS
+		while(i >= 0 && cmd[i] == ' ' || (cmd[i] == '/' && cmd[i-1] != ' '))
+			i--;
+		
+		//PEGAR DESTINO
+		j=0;
+		while(i >= 0 && cmd[i] != ' ')
+		{
+			aux[j] = cmd[i];
+			i--;
+			j++;
+		}	
+		aux[j] = '\0';
+		inverter_string(caminho_destino, aux);
+//		printf("%s", caminho_destino);	
+	}
+	//else
+//	{
+//		strcpy(caminho_origem, caminho_destino);
+//		caminho_destino[0] = '\0';
+//	}
 }
 
 //função unlink - h
-void unlink_fisico()
+void unlink_fisico(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, int endereco_inode_dir_atual, char comando[])
 {
+		//STRING COMANDO CONTEM PRIMEIRO O CAMINHO DA ORIGEM DO ARQUIVO E SEGUNDO O CAMINHO DESTINO DO LINK
 	
+	char caminho_destino[100],
+		 nome_linkh_criar[100];
+	
+	int endereco_inode_atual,
+		endereco_inode_dir_destino,
+		endereco_inode_dir_posicao_atual;
+	
+	
+	caminho_destino[0] = '\0';
+	nome_linkh_criar[0] = '\0';
+	
+	endereco_inode_dir_posicao_atual = endereco_inode_dir_atual;
+	
+	split_funcao_comando_unlink(caminho_destino, nome_linkh_criar, comando);
+	
+	
+
+	if(strlen(caminho_destino) > 0)
+	{
+		//BUSCAR CAMINHO DE DESTINO
+		if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_atual, &endereco_inode_dir_atual, caminho_destino))
+		{
+			//VERIFICA SE  TEM O NOME DESEJADO
+			if(nome_igual_diretorio(disco, endereco_inode_atual, nome_linkh_criar, 0))
+			{
+				if(disco[endereco_inode_atual].inode.permissoes[0] == 'd')
+				{
+					//GUARDA O ENDERECO DO INODE DE DIRETORIO DESTINO ACHADO
+					endereco_inode_dir_destino = endereco_inode_atual;
+					
+					remover_link_fisico(disco, endereco_inode_dir_destino, nome_linkh_criar);
+				}
+				else
+					printf("ENDERECO NAO CONTEM O LINK INFORMADO");
+			}
+			else
+				printf("NOME NAO EXISTE NO DIRETORIO DE DESTINO.\n");
+		}
+		else
+			printf("ENDERECO DO DESTINO NAO EXISTE.\n");
+	}
+	//NAO TEM CAMINHO DE ORIGEM, CRIAR LINK NO PROPRIO DIRETORIO ATUAL
+	else
+	{
+		//VERIFICA SE TEM O NOME DESEJADO
+		if(nome_igual_diretorio(disco, endereco_inode_dir_posicao_atual, nome_linkh_criar, 0))
+		{
+			//GUARDA O ENDERECO DO INODE DE DIRETORIO DESTINO ACHADO
+			endereco_inode_dir_destino = endereco_inode_dir_posicao_atual;
+			
+			remover_link_fisico(disco, endereco_inode_dir_destino, nome_linkh_criar);
+		}
+		else
+			printf("LINK NAO ENCONTRADO");
+	}
+}
+
+void remover_link_simbolico(Block disco[], int *topo_blocks_free, int endereco_inode_dir_destino, char nome_link_deletar[])
+{
+	int endereco_inode_link_simb,
+		endereco_estrutura_path_link,
+		endereco_estrutura_diretorio_atual,
+		tl_dir,
+		i;
+	
+	endereco_inode_link_simb = 
+	
+	//PEGA ENDERECO DA ESTRUTURA DO DIRETORIAL PARA INSERIR O NOME E O INODE NUMBER
+	endereco_estrutura_diretorio_atual = disco[endereco_inode_dir_destino].inode.b_diretos[0];
+	
+	//TL DA ESTRUTURA ONDE SERA INSERIDO O NUMERO DO INODE E NOME DO LINK
+	tl_dir = disco[endereco_estrutura_diretorio_atual].diretorio.tl--;
+	
+	//PROCURAR NOME DO LINK A ESTRUTURA DE DIRETORIO ATUAL
+	for(i=0 ; i < tl_dir && 
+			strcmp( disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[i], nome_link_deletar) !=0 ; i++);
+			
+	if(strcmp( disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[i], nome_link_deletar) == 0)
+	{
+		endereco_inode_link_simb = disco[endereco_estrutura_diretorio_atual].diretorio.i_numero[i];
+		endereco_estrutura_path_link = disco[endereco_inode_link_simb].inode.b_diretos[0];
+		
+		//REMANEJAR A ESTRUTURA DE DIRETORIO ATUAL
+		while(i < tl_dir-1)
+		{
+			strcpy(disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[i], 
+				disco[endereco_estrutura_diretorio_atual].diretorio.nome_arq[i+1]);
+				
+			disco[endereco_estrutura_diretorio_atual].diretorio.i_numero[i] = 
+				disco[endereco_estrutura_diretorio_atual].diretorio.i_numero[i+1];	
+		}
+	}		
+	
+	
+	//INSERE ENDERECO PARA O INODE DO LINK
+	push_lista_block(disco, &*topo_blocks_free, endereco_inode_link_simb);
+	
+	//INSERE ENDERECO PARA O PATH DO LINK
+	push_lista_block(disco, &*topo_blocks_free, endereco_estrutura_path_link);
 }
 
 //função unlink - s
-void unlink_simbolico()
+void unlink_simbolico(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, int endereco_inode_dir_atual, char comando[])
 {
+	//STRING COMANDO CONTEM PRIMEIRO O CAMINHO DA ORIGEM DO ARQUIVO E SEGUNDO O CAMINHO DESTINO DO LINK
 	
+	char caminho_origem[100],
+		 caminho_destino[100],
+		 nome_linkh_criar[100],
+		 caminho_completo[100];
+	
+	int endereco_inode_atual,
+		endereco_inode_origem,
+		endereco_inode_dir_destino,
+		endereco_inode_dir_posicao_atual;
+	
+	
+	caminho_origem[0] = '\0';
+	caminho_destino[0] = '\0';
+	nome_linkh_criar[0] = '\0';
+	
+	
+
+	endereco_inode_dir_posicao_atual = endereco_inode_dir_atual;
+	
+	split_funcao_comando_unlink(caminho_destino, nome_linkh_criar, comando);
+	
+	
+	if(strlen(caminho_destino) > 0)
+	{
+		//BUSCAR CAMINHO DE DESTINO
+		if(buscar_inode(disco, endereco_inode_dir_raiz, &endereco_inode_atual, 
+							&endereco_inode_dir_atual, caminho_destino))
+		{
+			//VERIFICA SE NO DIRETORIO DO DESTINO JA NAO TEM O NOME DESEJADO
+			if(nome_igual_diretorio(disco, endereco_inode_atual, nome_linkh_criar, 0))
+			{
+				if(disco[endereco_inode_atual].inode.permissoes[0] == 'd')
+				{
+					//GUARDA O ENDERECO DO INODE DE DIRETORIO DESTINO ACHADO
+					endereco_inode_dir_destino = endereco_inode_atual;
+					//
+//					//FAZER NOME COMPLETO
+//					strcat(caminho_completo, caminho_destino);
+//					strcat(caminho_completo, "/");
+//					strcat(caminho_completo, nome_linkh_criar);
+//					
+					//INSERIR
+					remover_link_simbolico(disco, &*topo_blocks_free, endereco_inode_dir_destino, nome_linkh_criar);
+				}
+				else
+					printf("DESTINO TEM QUE SER UM DIRETORIO VALIDO");
+			}
+			else
+				printf("NOME NAO EXISTE NO DIRETORIO DE DESTINO.\n");
+		}
+		else
+			printf("ENDERECO DO DESTINO NAO EXISTE.\n");
+	}
+	//NAO TEM CAMINHO DE ORIGEM, CRIAR LINK NO PROPRIO DIRETORIO ATUAL
+	else
+	{
+		//VERIFICA SE NO DIRETORIO DO DESTINO JA NAO TEM O NOME DESEJADO
+		if(nome_igual_diretorio(disco, endereco_inode_dir_posicao_atual, nome_linkh_criar, 0))
+		{
+			//GUARDA O ENDERECO DO INODE DE DIRETORIO DESTINO ACHADO
+			endereco_inode_dir_destino = endereco_inode_dir_posicao_atual;
+			
+			//INSERIR
+			remover_link_simbolico(disco, &*topo_blocks_free, endereco_inode_dir_destino, 
+				nome_linkh_criar);
+		}
+		else
+			printf("NOME NAO EXISTE NO DIRETORIO DE DESTINO.\n");
+	}	
+
+
 }
 
 void split_funcao_criar_diretorio(char nome_arquivo[], char caminho[], char cmd_full[])
@@ -1070,14 +1639,15 @@ void listar_diretorio(Block disco[], int endereco_inode_dir_atual, int extendido
 }
 
 //funcao ls -l
-void listar_diretorio_atributos(Block disco[], int endereco_inode_dir_atual, int extendido)
+void listar_diretorio_atributos(Block disco[], int endereco_inode_dir_atual, int extendido, int show_inode_number)
 {
 	int endereco_struct_dir,
 		endereco_inode,
 		i,
 		j,
 		tl_dir,
-		endereco_struct_extend;
+		endereco_struct_extend,
+		endereco_estrutura_path_link;
 	
 	if(extendido)
 		endereco_struct_dir = endereco_inode_dir_atual;
@@ -1091,7 +1661,8 @@ void listar_diretorio_atributos(Block disco[], int endereco_inode_dir_atual, int
 		{	
 			endereco_inode = disco[endereco_struct_dir].diretorio.i_numero[i];
 			
-				
+			if(show_inode_number)
+				printf("%d ", endereco_inode);	
 			printf("%s ", disco[endereco_inode].inode.permissoes);
 			printf("%5d ", disco[endereco_inode].inode.contador_link_hard);					 
 			printf("%s ", disco[endereco_inode].inode.nome_usuario);
@@ -1107,7 +1678,18 @@ void listar_diretorio_atributos(Block disco[], int endereco_inode_dir_atual, int
 //				textcolor(6);
 //			else
 //				textcolor(7);
-			printf("%s\n" , disco[endereco_struct_dir].diretorio.nome_arq[i]);
+
+			//CASO FOR LINK, MOSTRAR O PATH
+			if(disco[endereco_inode].inode.permissoes[0] == 'l')
+			{
+				//NOME DO ARQUIVO
+				printf("%s" , disco[endereco_struct_dir].diretorio.nome_arq[i]);
+				
+				endereco_estrutura_path_link = disco[endereco_inode].inode.b_diretos[0];
+				printf(" -> %s\n", disco[endereco_estrutura_path_link].link_simb.caminho);
+			}
+			else
+				printf("%s\n" , disco[endereco_struct_dir].diretorio.nome_arq[i]);
 			
 //			textcolor(15);	
 													 
@@ -1120,7 +1702,7 @@ void listar_diretorio_atributos(Block disco[], int endereco_inode_dir_atual, int
 	if(i == 12)
 	{
 		endereco_struct_extend = disco[endereco_struct_dir].diretorio.i_numero[i];
-		listar_diretorio_atributos(disco, endereco_struct_extend, 1);
+		listar_diretorio_atributos(disco, endereco_struct_extend, 1, show_inode_number);
 	}
 		
 //	textcolor(15);	
@@ -1131,21 +1713,27 @@ void ls_and_lsl(Block disco[], int endereco_dir_atual, char comando[])
 	char lsl;
 	int i;
 	
-	lsl=0;
+	lsl=-1;
 	
 	i=0;
 	while(comando[i] != '\0' && comando[i] != '\n' &&
-		  comando[i+1] != '\0' && comando[i+1] != '\n')
+		  comando[i+1] != '\0' && comando[i+1] != '\n' && lsl == -1)
 	{
 		if(comando[i] == '-' && comando[i+1] == 'l')
-			lsl=1;
+			lsl=0;
+		else if(comando[i+2] != '\0' && comando[i+2] != '\n' &&
+				comando[i] == '-' && comando[i+1] == 'a' && comando[i+2] == 'l')
+			lsl=1;		
+		
 		i++;	
 	}
 	
-	if(lsl)
-		listar_diretorio_atributos(disco, endereco_dir_atual, 0);
-	else
+	if(lsl == -1) // 
 		listar_diretorio(disco, endereco_dir_atual, 0);
+	else if(lsl == 0)
+		listar_diretorio_atributos(disco, endereco_dir_atual, 0, 0);
+	else if(lsl == 1)
+		listar_diretorio_atributos(disco, endereco_dir_atual, 0, 1);
 		
 	}
 
@@ -1200,7 +1788,7 @@ char verificar_blocks_extend_duplo(Block disco[], int i_numero, int * tamanho)
 	return bad_block;
 }
 
-char verificar_consistencia_arquivo(Block Disco[], int i_num);
+
 
 char verificar_blocks_extend_triplo(Block disco[], int i_numero, int * tamanho)
 {
@@ -1394,7 +1982,7 @@ void rmdir(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, i
 }
 
 
-void deletar_arquivo(Block disco[], int * topo_blocks_free, int endereco_inode_atual, int *quantidade_blocos);
+
 
 void remover_inode_extend_simples(Block disco[], int * topo_blocks_free, int endereco_inode_atual_simples, 
 								  int *quantidade_blocos, int * cont_blocks)
@@ -1650,7 +2238,7 @@ void rm(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, int e
 
 
 //funcao cd
-void mover_para_diretorio(Block disco[], int endereco_inode_raiz ,int * endereco_inode_dir_atual,char string_caminho[])
+char mover_para_diretorio(Block disco[], int endereco_inode_raiz ,int * endereco_inode_dir_atual,char string_caminho[])
 {
 	char caminhos[100][255],
 		 dir_valido;
@@ -1660,7 +2248,8 @@ void mover_para_diretorio(Block disco[], int endereco_inode_raiz ,int * endereco
 		dir_atual,
 		i,
 		j,
-		tl_caminhos;
+		tl_caminhos,
+		endereco_path_link_simb;
 	
 	//SEPARA NOMES NUMA LISTA DE NOMES
 	tl_caminhos=0;	
@@ -1696,8 +2285,22 @@ void mover_para_diretorio(Block disco[], int endereco_inode_raiz ,int * endereco
 			{
 				//verifica se realmente o nome achado eh um diretorio, olhando no inode do diretorio
 				i_node_atual_aux = disco[dir_atual].diretorio.i_numero[j];
+				
+				//DIRETORIO?
 				if(disco[i_node_atual_aux].inode.permissoes[0] == 'd')
 					i_node_atual = i_node_atual_aux;
+				
+				//LINK SIMBOLICO?
+				else if(disco[i_node_atual_aux].inode.permissoes[0] == 'l')
+				{
+					//PEGO ENDERECO DO LINK SIMB
+					endereco_path_link_simb = disco[i_node_atual_aux].inode.b_diretos[0];
+//					i_node_atual;
+					
+					//CHAMO A MESMA FUNCAO REC COMO CAMINHO DO LINK SIMB
+					dir_valido = mover_para_diretorio(disco, endereco_inode_raiz, &i_node_atual, 
+														disco[endereco_path_link_simb].link_simb.caminho);
+				}
 				else
 					dir_valido=0;
 			}
@@ -1711,7 +2314,12 @@ void mover_para_diretorio(Block disco[], int endereco_inode_raiz ,int * endereco
 
 	
 	if(dir_valido)
+	{
 		*endereco_inode_dir_atual = i_node_atual;
+		return 1;
+	}
+	
+	return 0;
 }
 
 void split_funcao_tornar_block_bad(int * num_block, char cmd_full[])
@@ -1996,6 +2604,74 @@ void touch( Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz,
 		printf("Digite corretamente o arquivo\n");
 }
 
+void links(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, int endereco_inode_dir_atual, char comando[])
+{	
+	/*
+		tipo_link = 0 => link fisico
+		tipo_link = 1 => link_simbolico
+	*/
+	char tipo_link;
+	
+	int i,
+		j;
+	
+	tipo_link = -1;
+	
+	i=0;
+	//TRATAR ESPACOS
+	while(comando[i] != '\0' && comando[i] == ' ')
+		i++;
+	
+	//PEGAR PARTE DA STRING QUE ESPECIFICA QUE TIPO DE LINK EH
+	while(comando[i] != '\0' && tipo_link == -1)
+	{
+		if(comando[i+1] != '\0' && comando[i+1] != '\n' &&
+			comando[i] == '-' && comando[i+1] == 'h')
+				tipo_link = 0;
+				
+		else if(comando[i+1] != '\0' && comando[i+1] != '\n' &&
+			comando[i] == '-'  && comando[i+1] == 's')
+				tipo_link = 1;		
+		i++;
+	}
+	
+	if(tipo_link != -1)
+	{
+		//RETIRAR COMANDO DEIXAR SOMENTE CAMINHOS DO LINK
+		
+		//TRATAR ESPACO E LUGAR PARADO NA STRING "H", "S" E "-"
+		while(comando[i] == ' ' || comando[i] == '-' || comando[i] == 'h' || comando[i] == 's')
+			i++;
+		
+		//AGORA SIM, DEIXAR A STRING COMANDO SOMENTE COM OS CAMINHOS.	
+		if(comando[i] != '\0' && comando[i] != '\n')
+		{
+			j=0;
+			while(comando[i] != '\0' && comando[i] != '\n')
+			{
+				comando[j] = comando[i];
+				i++;
+				j++;	
+			}
+			comando[j] = '\0';
+			
+			//CHAMAR O METODO CORRETO PARA FAZER O LINK
+			if(tipo_link == 0)
+				link_fisico(disco, &*topo_blocks_free, endereco_inode_dir_raiz, endereco_inode_dir_atual, comando);
+			else
+				link_simbolico(disco, &*topo_blocks_free, endereco_inode_dir_raiz, endereco_inode_dir_atual, comando);
+		}
+		else
+			printf("NECESSARIO ESPECIFICAR OS CAMINHOS CORRETAMENTE.\n");
+			
+	}
+	else
+		printf("NECESSARIO FORNECER O TIPO DO LINK.\n");	
+		
+		
+}
+
+
 void pega_funcao(char funcao[], char comando[])
 {
 	int i;
@@ -2015,32 +2691,6 @@ void ler_comando(Block disco[], int * topo_blocks_free, int tf_disco,int enderec
 	char funcao[30], 
 		 comando[255];
 	
-		
-	//PARA TESTE {
-	
-//	char *strings[] = {"mkdir diretorio1\0",
-//						"mkdir diretorio2\0",
-//						"mkdir diretorio3\0",
-//						"mkdir diretorio4\0",
-//						"mkdir diretorio5\0",
-//						"mkdir diretorio6\0",
-//						"mkdir diretorio7\0",
-//						"mkdir diretorio8\0",
-//						"mkdir diretorio9\0",
-//						"mkdir diretorio10\0",
-//						"mkdir diretorio11\0"};
-//	int i;
-//	
-//						
-//	int inode_num = disco[*endereco_inode_dir_atual].inode.b_diretos[0];
-//	
-//	listar_diretorio_atributos(disco, *endereco_inode_dir_atual);
-//	
-//	
-//	for(i=0 ; i < 11 ; i++)
-//		criar_diretorio(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, strings[i]);
-	
-	// }
 	while(strcmp(comando,"exit") != 0)
 	{
 		printf("[%s@%s]: ", NOME_USUARIO_PADRAO, NOME_GRUPO_PADRAO);
@@ -2077,16 +2727,9 @@ void ler_comando(Block disco[], int * topo_blocks_free, int tf_disco,int enderec
 			else if(strcmp(funcao, "ls") == 0)
 				ls_and_lsl(disco, *endereco_inode_dir_atual, comando);
 			
-	//		else if(strcmp(comando,"link") == 0)
-			//{
-	//			if(strcmp(nome, "-h") == 0 && strcmp(n1, "") != 0 && strcmp(n2, "") != 0)
-	//				link_fisico(n1,n2);
-	//			else
-	//				if(strcmp(nome, "-s") == 0 && strcmp(n1, "") != 0 && strcmp(n2, "") != 0)
-	//					link_simbolico(n1,n2);
-	//				else
-	//					printf("- Opcao de link  ou nomes de arquivos invalidos.");
-	//		}
+			else if(strcmp(funcao, "link") == 0)
+				links(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
+					
 	//		else if(strcmp(comando,"unlink") == 0)
 			//{
 	//			if(strcmp(nome, "-h") == 0)
@@ -2105,8 +2748,6 @@ void ler_comando(Block disco[], int * topo_blocks_free, int tf_disco,int enderec
 		}
 	}
 }
-
-//aagit test
 
 int main()
 {	
