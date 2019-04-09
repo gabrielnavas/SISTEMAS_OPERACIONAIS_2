@@ -2749,6 +2749,8 @@ void ler_comando(Block disco[], int * topo_blocks_free, int tf_disco,int enderec
 	}
 }
 
+///quero dormir.
+
 int main()
 {	
 	
