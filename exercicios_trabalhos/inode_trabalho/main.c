@@ -117,7 +117,6 @@ void init_blocos_livres(Block disco[], int total_blocos)
 		disco[i].no_lista_block.tl++;	
 		while(disco[i].no_lista_block.tl < 10 && inicio_endereco_block_livres < total_blocos)
 		{
-//			strcpy(disco[i].tipo, LISTA_BLOCK_FREE);
 			disco[i].no_lista_block.pilha[ disco[i].no_lista_block.tl++ ] = inicio_endereco_block_livres;
 			
 //			disco[inicio_endereco_block_livres].tipo = 'F';
@@ -127,6 +126,7 @@ void init_blocos_livres(Block disco[], int total_blocos)
 		
 	}
 	
+	//ULTIMO BLOCO 
 	disco[i].no_lista_block.prox = -1;
 }
 
@@ -852,36 +852,6 @@ char buscar_inode(Block disco[], int endereco_inode_dir_raiz,
 	
 	return 0;
 }
-
-//======================================================================= APAGAR DEPOIS ====================================
-//void testar_lista_blocos(Block disco[], int topo_blocks_free)
-//{
-//	int endereco;
-//	int i;
-//	int endereco_inode_dir_atual;
-//	int dir_padrao;
-//	
-//	criar_diretorio_raiz(disco, &topo_blocks_free, &dir_padrao);
-//	listar_diretorio_atributos(disco, dir_padrao);
-//	
-//	exibir_blocos_livres(disco, topo_blocks_free);//
-//	
-//	printf("\n\nQUANTIDADE BLOCOS LIVRES: %d\n", quantidade_blocks_livres(disco, topo_blocks_free));
-//	
-//	for(i=0 ; i < 9 ; i++)
-//	{
-//		pop_lista_block(disco, &topo_blocks_free, &endereco);
-//		printf("%d\n", endereco);
-//	}
-//	
-//	
-//	printf("\n\nQUANTIDADE BLOCOS LIVRES: %d\n", quantidade_blocks_livres(disco, topo_blocks_free));
-//	
-//	pop_lista_block(disco, &topo_blocks_free, &endereco);
-//	printf("%d\n", endereco);
-//			
-//	printf("\n\nQUANTIDADE BLOCOS LIVRES: %d\n", quantidade_blocks_livres(disco, topo_blocks_free));
-//}
 
 void inserir_link_fisico(Block disco[], int endereco_inode_origem, int endereco_inode_dir_destino, char nome_linkh_criar[])
 {
@@ -2609,13 +2579,25 @@ void links(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, i
 	/*
 		tipo_link = 0 => link fisico
 		tipo_link = 1 => link_simbolico
+	
+	
+		link_unlink = 1 =>link
+		link_unlink = 0 =>unlink
 	*/
-	char tipo_link;
+	
+	
+	char tipo_link,
+		 link_unlink,
+		 tipo_comando[7];
 	
 	int i,
-		j;
+		j,
+		tl_tp_comando;
 	
 	tipo_link = -1;
+	link_unlink = -1;
+	tl_tp_comando = 0;
+	tipo_comando[0] = '\0';
 	
 	i=0;
 	//TRATAR ESPACOS
@@ -2632,6 +2614,27 @@ void links(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, i
 		else if(comando[i+1] != '\0' && comando[i+1] != '\n' &&
 			comando[i] == '-'  && comando[i+1] == 's')
 				tipo_link = 1;		
+				
+		if(comando[i] != ' ' && link_unlink == -1)
+		{
+			tipo_comando[tl_tp_comando] = comando[i];
+			tl_tp_comando++;
+		}
+		
+		if(strcmp(tipo_comando, "link") == 0)
+		{
+			link_unlink = 1;
+			tipo_comando[tl_tp_comando] = '\0';
+			tl_tp_comando++;
+		}
+		else if(strcmp(tipo_comando, "unlink") == 0)
+		{
+			link_unlink = 0;
+			tipo_comando[tl_tp_comando] = '\0';
+			tl_tp_comando++;
+				
+		}
+		
 		i++;
 	}
 	
@@ -2655,11 +2658,29 @@ void links(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, i
 			}
 			comando[j] = '\0';
 			
-			//CHAMAR O METODO CORRETO PARA FAZER O LINK
-			if(tipo_link == 0)
-				link_fisico(disco, &*topo_blocks_free, endereco_inode_dir_raiz, endereco_inode_dir_atual, comando);
+			
+			if(link_unlink == 1)
+			{
+				//CHAMAR O METODO CORRETO PARA FAZER O LINK
+				if(tipo_link == 0)
+					link_fisico(disco, &*topo_blocks_free, endereco_inode_dir_raiz, endereco_inode_dir_atual, comando);
+				else if(tipo_link == 1)
+					link_simbolico(disco, &*topo_blocks_free, endereco_inode_dir_raiz, endereco_inode_dir_atual, comando);
+				else
+					printf("COMANDO DE LINK INVALIDO.\n");
+			}
+			else if(link_unlink == 0)
+			{
+				if(tipo_link == 0)
+					unlink_fisico(disco, &*topo_blocks_free, endereco_inode_dir_raiz, endereco_inode_dir_atual, comando);
+				else if(tipo_link == 1)
+					unlink_simbolico(disco, &*topo_blocks_free, endereco_inode_dir_raiz, endereco_inode_dir_atual, comando);
+				else
+					printf("COMANDO DE LINK INVALIDO.\n");
+			}
 			else
-				link_simbolico(disco, &*topo_blocks_free, endereco_inode_dir_raiz, endereco_inode_dir_atual, comando);
+				printf("COMANDO DE LINK INVALIDO.\n");
+			
 		}
 		else
 			printf("NECESSARIO ESPECIFICAR OS CAMINHOS CORRETAMENTE.\n");
@@ -2667,10 +2688,145 @@ void links(Block disco[], int * topo_blocks_free, int endereco_inode_dir_raiz, i
 	}
 	else
 		printf("NECESSARIO FORNECER O TIPO DO LINK.\n");	
-		
-		
 }
 
+void df(Block disco[], int endereco_inode_dir_raiz, int endereco_inode_dir_atual)
+{
+	
+}
+
+void split_comando_relatorios(char cmd[], int * op)
+{
+	int i,
+		j;
+			
+	char op_number[255],
+		 aux[255];
+	
+	op_number[0] = '\0';
+	
+	i = strlen(cmd)-1;
+	
+	//TRATAR ESPACOS
+	while(i >= 0 && cmd[i] == ' ')
+		i--;
+	
+	i=0;
+	while(i >= 0 && cmd[i] != ' ')
+	{
+		aux[j] = cmd[i];
+		i--;
+		j++;
+	}
+	aux[j] = '\0';
+	
+	if(is_number(aux))
+	{
+		inverter_string(op_number, aux);
+		*op = atoi(op_number);
+	}
+	else
+		*op = -1;
+}
+
+void mostrar_relatorios(Block disco[], int *topo_blocks_free, int endereco_inode_dir_raiz, int *endereco_inode_dir_atual, char comando[])
+{
+	int op;
+	
+	split_comando_relatorios(comando, &op);
+	
+	
+	//APENAS MOSTRAR AS OPCOES DE RELATORIOS
+	if(op == -1)
+	{
+		textcolor(3);
+		printf("\t**** RELATORIOS ****\n\n");
+		
+		
+		textcolor(1);
+		printf("[ 1 ] - O numero de blocos ocupados por um arquivo escolhido por usuario.\n");
+		printf("[ 2 ] - O tamanho (em blocos) do maior arquivo que ainda pode ser criado nesse disco.\n");
+		printf("[ 3 ] - Quais arquivos estão íntegros e quais estão corrompidos por blocos defeituosos (badblocks).\n");
+		printf("[ 4 ] - Apresentar quantos  blocos do disco estão perdidose quais sao eles,\
+				ou seja,  nao sao  usados  por arquivose nem estao marcados como livres ou defeituosos.\
+				Nao esqueça de apresentar o espaço de disco perdido em bytes ocupados por um arquivo escolhido por usuario.\n");
+		printf("[ 5 ] - Imprima todos os blocos em seu estado atual, igual a figura b.\n");
+		printf("[ 6 ] - Visualize os arquivos  e  diretórios  alocados,  apresentando  o  nome  e  seus  números  do  bloco\
+				correspondentes  identificando otipo.Esta  visualização  deve  ser algo  semelhante  ao  Windows explore.\
+				Nao precisa ser grafico\n");
+		printf("[ 7 ] - Visualizar a arvore de diretório igual a figura D, apresentado as estruturas com seus atribuidos,\
+				nomes e numeros\n");
+		printf("[ 8 ] - Visualizar os links simbolicos e fisicos criados, detalhando as entradas de diretório, inodes e numeros\n");
+		
+		printf("\tEscolha uma opcao, exemplo: relatorio 2\n\n");
+		
+		textcolor(15);
+	}
+	else
+	{
+		switch(op)
+		{
+			case '1':
+//				relatorio1();
+				break;
+			
+			case '2':
+//				relatorio2();
+				break;
+			
+			case '3':
+//				relatorio3();
+				break;
+			
+			case '4':
+//				relatorio4();
+				break;
+			
+			case '5':
+//				relatorio5();
+				break;
+			
+			case '6':
+//				relatorio6();
+				break;
+			
+			case '7':
+//				relatorio7();
+				break;
+			
+			case '8':
+//				relatorio8();
+				break;
+					
+		}
+	}
+}
+
+void init_str(char str[], int tam)
+{
+	int i;
+	
+	for(i=0 ; i < tam ; i++)
+		str[i] = '\0';
+}
+
+
+void pergunta_tamanho_disco(int * tf_disco)
+{
+	do
+	{
+		textcolor(3); printf("\n\tQual tamanho de disco?\n\t--> ");
+		textcolor(5); scanf("%d", &*tf_disco);
+	
+		if(*tf_disco > 1000 || *tf_disco <= 0)
+		{
+			textcolor(8);
+			printf("\n\nTamanho tem que ser entre 1 e 1000");
+		}
+		
+		textcolor(15);
+	}while(*tf_disco > 1000 || *tf_disco <= 0);
+}
 
 void pega_funcao(char funcao[], char comando[])
 {
@@ -2693,6 +2849,9 @@ void ler_comando(Block disco[], int * topo_blocks_free, int tf_disco,int enderec
 	
 	while(strcmp(comando,"exit") != 0)
 	{
+		init_str(comando, 30);
+		init_str(funcao, 255);
+		
 		printf("[%s@%s]: ", NOME_USUARIO_PADRAO, NOME_GRUPO_PADRAO);
 		fflush(stdin); scanf("%[^\n]s", &comando);
 	
@@ -2727,29 +2886,24 @@ void ler_comando(Block disco[], int * topo_blocks_free, int tf_disco,int enderec
 			else if(strcmp(funcao, "ls") == 0)
 				ls_and_lsl(disco, *endereco_inode_dir_atual, comando);
 			
-			else if(strcmp(funcao, "link") == 0)
+			else if(strcmp(funcao, "df") == 0)
+				df(disco, endereco_inode_dir_raiz, *endereco_inode_dir_atual);
+			
+			else if(strcmp(funcao, "link") == 0 || strcmp(funcao, "unlink") == 0)
 				links(disco, &*topo_blocks_free, endereco_inode_dir_raiz, *endereco_inode_dir_atual, comando);
 					
-	//		else if(strcmp(comando,"unlink") == 0)
-			//{
-	//			if(strcmp(nome, "-h") == 0)
-	//				unlink_fisico();
-	//			else
-	//				if(strcmp(nome, "-s") == 0)
-	//					unlink_simbolico();
-	//				else
-	//					printf("- Opcao de link invalida.");
-	//		}
 			else if(strcmp(funcao, "clear") == 0)
 				system("cls");
 				
+			else if(strcmp(funcao, "relatorio") == 0)
+				mostrar_relatorios(disco, &*topo_blocks_free, endereco_inode_dir_raiz, &*endereco_inode_dir_atual, comando);	
+				
 			else
-				printf("function not found\n");	
+				printf("FUNCAO NAO ENCONTRADA.\n");	
 		}
 	}
 }
 
-///quero dormir.
 
 int main()
 {	
@@ -2766,7 +2920,9 @@ int main()
 	topo_blocks_free = 0;
 	
 	//TAMANHO FISICO DISCO
-	tf_disco = 1000;
+//	tf_disco = 1000;
+		
+	pergunta_tamanho_disco(&tf_disco);	
 		
 	//INICIAR LISTA DE PILHA DE BLOCOS COM ENDERECOS
 	init_blocos_livres(disco, tf_disco);
